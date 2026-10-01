@@ -1,0 +1,33 @@
+[package]
+name = "michi-setup"
+version = "0.1.0"
+edition = "2021"
+description = "Instalador de Michi"
+
+[dependencies]
+# La misma base que el navegador: ventana sin bordes + WebView2 con la
+# interfaz en HTML (installer/ui/).
+wry = "0.57"
+winit = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+rfd = "0.15"
+# SHA-256 para verificar cada archivo al extraerlo.
+ring = "0.17"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# Accesos directos (.lnk): IShellLinkW es una interfaz COM.
+windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }
+
+[build-dependencies]
+embed-resource = "3"

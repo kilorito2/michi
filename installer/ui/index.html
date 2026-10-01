@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Michi</title>
+<style>
+  :root {
+    --text: #f6f5fb;
+    --text-dim: rgba(246,245,251,0.64);
+    --text-faint: rgba(246,245,251,0.42);
+    --glass: rgba(18,16,30,0.62);
+    --glass-strong: rgba(26,23,42,0.78);
+    --line: rgba(255,255,255,0.12);
+    --line-strong: rgba(255,255,255,0.22);
+    --hover: rgba(255,255,255,0.08);
+    /* Los colores del zorro. */
+    --brand-1: #ff2e7e;
+    --brand-2: #ff7a1a;
+    --brand-3: #ffc93c;
+    --brand: linear-gradient(120deg, var(--brand-1), var(--brand-2) 55%, var(--brand-3));
+    --ok: #7cf29c;
+    --danger: #ff6b6b;
+    --ease: cubic-bezier(.2,.8,.2,1);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; width: 100vw; height: 100vh; overflow: hidden;
+    font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    color: var(--text); background: #0c0b16; user-select: none;
+  }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--brand-2); outline-offset: 2px; }
+
+  /* ---- Fondo: el fondo animado del navegador, difuminado ---- */
+  #backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; }
+  #backdrop > * {
+    position: absolute; inset: -4%; width: 108%; height: 108%; object-fit: cover;
+    opacity: 0; transition: opacity .9s ease;
+  }
+  #backdrop > .shown { opacity: 1; }
+  #backdrop img { animation: drift 30s ease-in-out infinite alternate; }
+  @keyframes drift { from { transform: scale(1); } to { transform: scale(1.08); } }
+  #veil {
+    position: fixed; inset: 0; z-index: 1;
+    background:
+      radial-gradient(ellipse at 22% 45%, rgba(255,92,60,0.10), transparent 55%),
+      linear-gradient(90deg, rgba(8,7,16,0.30) 0%, rgba(8,7,16,0.55) 45%, rgba(8,7,16,0.72) 100%);
+  }
+
+  /* ---- Barra de titulo propia (la ventana no tiene bordes) ---- */
+  .titlebar {
+    position: relative; z-index: 3; height: 42px;
+    display: flex; align-items: center; gap: 10px; padding: 0 8px 0 16px;
+  }
+  .titlebar img { width: 18px; height: 18px; }
+  .titlebar .name { font-size: 12.5px; color: var(--text-dim); flex: 1; }
+  .win-btn {
+    width: 38px; height: 30px; border: none; background: transparent; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-dim);
+    transition: background .15s ease, color .15s ease;
+  }
+  .win-btn:hover { background: var(--hover); color: var(--text); }
+  .win-btn.close:hover { background: #e5484d; color: #fff; }
+  .win-btn[disabled] { opacity: .35; pointer-events: none; }
+  .win-btn svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 1.4; }
+
+  /* ---- Cuerpo: el zorro a la izquierda, la tarjeta a la derecha ---- */
+  .layout {
+    position: relative; z-index: 2; height: calc(100% - 42px);
+    display: grid; grid-template-columns: 330px 1fr; gap: 10px; padding: 0 28px 28px 22px;
+  }
+  .hero { display: flex; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 30px; }
+  .logo-wrap { position: relative; width: 168px; height: 168px; }
+  .logo-glow {
+    position: absolute; inset: 14%; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,122,26,0.55), rgba(255,46,126,0.25) 55%, transparent 72%);
+    filter: blur(22px); animation: glow 4.5s ease-in-out infinite;
+  }
+  .logo {
+    position: relative; width: 100%; height: 100%;
+    filter: drop-shadow(0 18px 30px rgba(0,0,0,0.35));
+    animation: float 6s ease-in-out infinite;
+  }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+  @keyframes glow { 0%, 100% { opacity: .75; transform: scale(1); } 50% { opacity: 1; transform: scale(1.12); } }
+  .brand-name {
+    margin: 22px 0 6px; font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+    font-size: 34px; font-weight: 600; letter-spacing: -.02em;
+  }
+  .version {
+    font-size: 11.5px; color: var(--text-dim); padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: rgba(255,255,255,0.05);
+  }
+  .steps { list-style: none; margin: 34px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; min-width: 170px; }
+  .steps li { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-faint); transition: color .3s ease; }
+  .steps .dot {
+    width: 20px; height: 20px; border-radius: 50%; flex: none; border: 1.5px solid var(--line-strong);
+    display: flex; align-items: center; justify-content: center; transition: all .3s var(--ease);
+  }
+  .steps .dot svg { width: 11px; height: 11px; stroke: #fff; fill: none; stroke-width: 2.4; opacity: 0; }
+  .steps li.current { color: var(--text); }
+  .steps li.current .dot { border-color: transparent; background: var(--brand); box-shadow: 0 0 0 4px rgba(255,122,26,0.18); }
+  .steps li.done { color: var(--text-dim); }
+  .steps li.done .dot { border-color: transparent; background: rgba(124,242,156,0.22); }
+  .steps li.done .dot svg { opacity: 1; stroke: var(--ok); }
+
+  /* ---- Tarjeta de vidrio ---- */
+  .card {
+    position: relative; align-self: stretch; overflow: hidden;
+    background: var(--glass); border: 1px solid var(--line); border-radius: 20px;
+    box-shadow: 0 30px 60px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .screen {
+    position: absolute; inset: 0; display: flex; flex-direction: column; padding: 34px 36px 28px;
+    opacity: 0; transform: translateX(18px); pointer-events: none;
+    transition: opacity .35s var(--ease), transform .45s var(--ease);
+  }
+  .screen.active { opacity: 1; transform: none; pointer-events: auto; }
+  .screen.leaving { transform: translateX(-18px); }
+  .scroll { flex: 1; overflow-y: auto; margin: 0 -14px; padding: 0 14px; }
+  .scroll::-webkit-scrollbar { width: 6px; }
+  .scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.16); border-radius: 3px; }
+
+  h1 {
+    margin: 0 0 10px; font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+    font-size: 30px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15;
+  }
+  h1 .grad { background: var(--brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { font-size: 14px; line-height: 1.6; color: var(--text-dim); margin: 0 0 22px; }
+  .lead b { color: var(--text); font-weight: 600; }
+  h3 { font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); margin: 22px 0 10px; }
+  h3:first-child { margin-top: 4px; }
+
+  .features { display: flex; flex-direction: column; gap: 14px; margin: 0 0 8px; }
+  .feature { display: flex; gap: 14px; align-items: flex-start; }
+  .feature .ico {
+    width: 36px; height: 36px; border-radius: 11px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.06); border: 1px solid var(--line);
+  }
+  .feature .ico svg { width: 18px; height: 18px; fill: none; stroke: var(--brand-3); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .feature .t { font-size: 14px; }
+  .feature .d { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; line-height: 1.45; }
+
+  .spacer { flex: 1; }
+  .footer { display: flex; align-items: center; gap: 10px; padding-top: 20px; }
+  .footer .note { flex: 1; font-size: 11.5px; color: var(--text-faint); line-height: 1.45; }
+
+  .btn {
+    height: 40px; padding: 0 20px; border-radius: 11px; border: 1px solid var(--line-strong);
+    background: rgba(255,255,255,0.06); cursor: pointer; font-size: 13.5px; white-space: nowrap;
+    transition: background .15s ease, transform .1s ease, box-shadow .2s ease, filter .15s ease;
+  }
+  .btn:hover { background: rgba(255,255,255,0.12); }
+  .btn:active { transform: scale(.97); }
+  .btn.primary {
+    border: none; background: var(--brand); color: #fff; font-weight: 600; padding: 0 24px;
+    box-shadow: 0 8px 24px rgba(255,90,60,0.35);
+  }
+  .btn.primary:hover { filter: brightness(1.08); box-shadow: 0 10px 28px rgba(255,90,60,0.45); }
+  .btn.primary:focus-visible, .btn.danger:focus-visible { outline: 2px solid rgba(255,255,255,0.55); outline-offset: 3px; }
+  .btn.danger { border: none; background: #e5484d; color: #fff; font-weight: 600; }
+  .btn.danger:hover { filter: brightness(1.1); }
+  .btn.link { border: none; background: transparent; color: var(--text-dim); padding: 0 8px; }
+  .btn.link:hover { color: var(--text); background: transparent; }
+  .btn[disabled] { opacity: .45; pointer-events: none; }
+
+  /* Personalizar: fondos */
+  .themes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .theme {
+    position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; cursor: pointer;
+    border: none; padding: 0; background: #16142a; outline-offset: 3px;
+    box-shadow: 0 0 0 1px var(--line); transition: box-shadow .2s ease, transform .2s var(--ease);
+  }
+  .theme:hover { transform: translateY(-2px); }
+  .theme video, .theme img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .theme .label {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 10px 7px; font-size: 12px; text-align: left;
+    background: linear-gradient(transparent, rgba(0,0,0,0.72));
+  }
+  .theme .check {
+    position: absolute; top: 7px; right: 7px; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--brand); display: flex; align-items: center; justify-content: center;
+    transform: scale(0); transition: transform .25s var(--ease);
+  }
+  .theme .check svg { width: 12px; height: 12px; stroke: #fff; stroke-width: 2.6; fill: none; }
+  .theme.selected { box-shadow: 0 0 0 2px var(--brand-2), 0 10px 24px rgba(0,0,0,0.35); }
+  .theme.selected .check { transform: scale(1); }
+
+  /* Personalizar: buscador */
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill {
+    height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line-strong);
+    background: rgba(255,255,255,0.05); cursor: pointer; font-size: 12.5px; transition: all .15s ease;
+  }
+  .pill:hover { background: rgba(255,255,255,0.1); }
+  .pill.selected { background: rgba(255,122,26,0.18); border-color: var(--brand-2); }
+
+  .kept { font-size: 12px; color: var(--text-faint); line-height: 1.5; margin: 12px 2px 0; }
+
+  /* Opciones */
+  .opt { display: flex; align-items: center; gap: 14px; padding: 11px 0; border-top: 1px solid var(--line); cursor: pointer; }
+  .opt:first-of-type { border-top: none; }
+  .opt .txt { flex: 1; }
+  .opt .t { font-size: 13.5px; }
+  .opt .d { font-size: 12px; color: var(--text-dim); margin-top: 2px; line-height: 1.4; }
+  .switch { position: relative; flex: none; width: 40px; height: 22px; }
+  .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+  .switch .track { position: absolute; inset: 0; border-radius: 11px; background: rgba(255,255,255,0.18); transition: background .2s ease; }
+  .switch .track::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+    background: #fff; transition: transform .22s var(--ease);
+  }
+  .switch input:checked + .track { background: var(--brand); }
+  .switch input:checked + .track::after { transform: translateX(18px); }
+  .switch input:focus-visible + .track { outline: 2px solid var(--brand-2); outline-offset: 2px; }
+  .switch.danger input:checked + .track { background: #e5484d; }
+
+  .folder { display: flex; align-items: center; gap: 10px; }
+  .path {
+    flex: 1; min-width: 0; height: 38px; padding: 0 12px; border-radius: 10px; display: flex; align-items: center;
+    background: rgba(0,0,0,0.22); border: 1px solid var(--line);
+    font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left;
+  }
+
+  /* Progreso */
+  .center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .ring { position: relative; width: 150px; height: 150px; margin-bottom: 24px; }
+  .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .ring circle { fill: none; stroke-width: 9; stroke-linecap: round; }
+  .ring .bg { stroke: rgba(255,255,255,0.08); }
+  .ring .fg { stroke: url(#brandGrad); transition: stroke-dashoffset .4s var(--ease); }
+  .ring .pct {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif; font-size: 34px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .ring .pct small { font-size: 16px; color: var(--text-dim); margin-left: 2px; }
+  .step-text { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .detail {
+    font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; color: var(--text-faint);
+    max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 16px;
+  }
+
+  /* Listo */
+  .big-check { width: 96px; height: 96px; margin-bottom: 22px; }
+  .big-check circle { fill: rgba(124,242,156,0.12); stroke: var(--ok); stroke-width: 3; }
+  .big-check path {
+    fill: none; stroke: var(--ok); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round;
+    stroke-dasharray: 60; stroke-dashoffset: 60;
+  }
+  .active .big-check path { animation: draw .6s .25s var(--ease) forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  .active .big-check { animation: pop .5s var(--ease); }
+  @keyframes pop { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+  .center .lead { max-width: 400px; margin-bottom: 26px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+  .alert-icon {
+    width: 64px; height: 64px; border-radius: 20px; margin-bottom: 20px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .alert-icon svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .alert-icon.err { background: rgba(255,107,107,0.14); color: var(--danger); }
+  .alert-icon.warn { background: rgba(255,201,60,0.14); color: var(--brand-3); }
+  .errmsg { white-space: pre-wrap; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="backdrop"></div>
+<div id="veil"></div>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff2e7e" /><stop offset=".55" stop-color="#ff7a1a" /><stop offset="1" stop-color="#ffc93c" />
+    </linearGradient>
+  </defs>
+</svg>
+
+<div class="titlebar" id="titlebar">
+  <img src="/icon.png" alt="" />
+  <span class="name" id="window-title">Instalador de Michi</span>
+  <button class="win-btn" id="min" title="Minimizar" aria-label="Minimizar"><svg viewBox="0 0 12 12"><path d="M1 6h10" /></svg></button>
+  <button class="win-btn close" id="close" title="Cerrar" aria-label="Cerrar"><svg viewBox="0 0 12 12"><path d="m1.5 1.5 9 9m0-9-9 9" /></svg></button>
+</div>
+
+<div class="layout">
+  <aside class="hero">
+    <div class="logo-wrap"><div class="logo-glow"></div><img class="logo" src="/icon.png" alt="" /></div>
+    <div class="brand-name">Michi</div>
+    <div class="version" id="version"></div>
+    <ol class="steps" id="steps"></ol>
+  </aside>
+
+  <main class="card">
+    <!-- BIENVENIDA -->
+    <section class="screen" id="welcome">
+      <h1 id="welcome-title">Hola. <span class="grad">Empecemos.</span></h1>
+      <p class="lead" id="welcome-lead">Un navegador rapido, con las pestanas al costado, fondos animados y la seguridad tomada en serio.</p>
+      <div class="features">
+        <div class="feature">
+          <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M15 4v16" /></svg></div>
+          <div><div class="t">Pestanas laterales y fondos animados</div><div class="d">La pagina ocupa toda la pantalla; las pestanas aparecen al acercar el cursor al borde.</div></div>
+        </div>
+        <div class="feature">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6z" /><path d="m9 12 2 2 4-4" /></svg></div>
+          <div><div class="t">Seguro por defecto</div><div class="d">HTTPS primero, SmartScreen, bloqueo de ventanas emergentes y extensiones con firma verificada.</div></div>
+        </div>
+        <div class="feature">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" /><circle cx="12" cy="8" r="4" /></svg></div>
+          <div><div class="t">Tus datos, en tu equipo</div><div class="d">Se instala solo para tu usuario, sin pedir permisos de administrador.</div></div>
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <div class="footer">
+        <div class="note" id="welcome-note"></div>
+        <button class="btn" id="go-custom">Personalizar</button>
+        <button class="btn primary" id="go-install">Instalar</button>
+      </div>
+    </section>
+
+    <!-- PERSONALIZAR -->
+    <section class="screen" id="custom">
+      <div class="scroll">
+        <h3>Fondo</h3>
+        <div id="look">
+          <div class="themes" id="themes"></div>
+          <h3>Buscador</h3>
+          <div class="pills" id="engines"></div>
+        </div>
+        <div class="kept" id="kept" hidden>Estan marcados tu fondo y tu buscador actuales: si eliges otros, se aplican al navegador. El resto de tus ajustes no cambia.</div>
+
+        <h3>Opciones</h3>
+        <label class="opt">
+          <div class="txt"><div class="t">Acceso directo en el menu Inicio</div></div>
+          <span class="switch"><input type="checkbox" id="opt-start" checked /><span class="track"></span></span>
+        </label>
+        <label class="opt">
+          <div class="txt"><div class="t">Acceso directo en el escritorio</div></div>
+          <span class="switch"><input type="checkbox" id="opt-desktop" checked /><span class="track"></span></span>
+        </label>
+        <label class="opt">
+          <div class="txt">
+            <div class="t">Ofrecerlo como navegador predeterminado</div>
+            <div class="d">Aparece en Configuracion &gt; Aplicaciones predeterminadas, donde Windows te deja elegirlo.</div>
+          </div>
+          <span class="switch"><input type="checkbox" id="opt-default" checked /><span class="track"></span></span>
+        </label>
+
+        <h3>Carpeta</h3>
+        <div class="folder">
+          <div class="path" id="path" title=""></div>
+          <button class="btn" id="pick">Cambiar</button>
+        </div>
+      </div>
+      <div class="footer">
+        <div class="note"></div>
+        <button class="btn link" id="back">Atras</button>
+        <button class="btn primary" id="go-install-2">Instalar</button>
+      </div>
+    </section>
+
+    <!-- DESINSTALAR -->
+    <section class="screen" id="uninstall">
+      <h1>Desinstalar <span class="grad">Michi</span></h1>
+      <p class="lead" id="uninstall-lead"></p>
+      <label class="opt">
+        <div class="txt">
+          <div class="t">Borrar tambien mis datos</div>
+          <div class="d">Historial, marcadores, ajustes, extensiones, cookies y contrasenas guardadas. Si no, quedan para cuando lo vuelvas a instalar.</div>
+        </div>
+        <span class="switch danger"><input type="checkbox" id="delete-data" /><span class="track"></span></span>
+      </label>
+      <div class="spacer"></div>
+      <div class="footer">
+        <div class="note"></div>
+        <button class="btn link" id="cancel-uninstall">Cancelar</button>
+        <button class="btn danger" id="do-uninstall">Desinstalar</button>
+      </div>
+    </section>
+
+    <!-- PROGRESO -->
+    <section class="screen" id="progress">
+      <div class="center">
+        <div class="ring">
+          <svg viewBox="0 0 160 160"><circle class="bg" cx="80" cy="80" r="70" /><circle class="fg" id="ring" cx="80" cy="80" r="70" /></svg>
+          <div class="pct"><span id="pct">0</span><small>%</small></div>
+        </div>
+        <div class="step-text" id="step">Preparando</div>
+        <div class="detail" id="detail"></div>
+      </div>
+    </section>
+
+    <!-- LISTO -->
+    <section class="screen" id="done">
+      <div class="center">
+        <svg class="big-check" viewBox="0 0 96 96"><circle cx="48" cy="48" r="44" /><path d="m30 49 12 12 25-26" /></svg>
+        <h1 id="done-title">Michi esta listo</h1>
+        <p class="lead" id="done-lead"></p>
+        <div class="actions" id="done-actions"></div>
+      </div>
+    </section>
+
+    <!-- MICHI ABIERTO -->
+    <section class="screen" id="running">
+      <div class="center">
+        <div class="alert-icon warn"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M3 9h18" /></svg></div>
+        <h1>Michi esta abierto</h1>
+        <p class="lead">Hay que cerrarlo para continuar. Lo que tengas sin guardar en las paginas abiertas se perdera.</p>
+        <div class="actions">
+          <button class="btn" id="running-cancel">Volver</button>
+          <button class="btn primary" id="running-close">Cerrar Michi y continuar</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ERROR -->
+    <section class="screen" id="error">
+      <div class="center">
+        <div class="alert-icon err"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5.5M12 16.5h.01" /></svg></div>
+        <h1>Algo salio mal</h1>
+        <p class="lead errmsg" id="error-msg"></p>
+        <div class="actions">
+          <button class="btn" id="error-close">Cerrar</button>
+          <button class="btn primary" id="error-retry">Reintentar</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  function ipc(cmd, extra) { window.ipc.postMessage(JSON.stringify(Object.assign({ cmd: cmd }, extra || {}))); }
+  function $(id) { return document.getElementById(id); }
+
+  var data = null;
+  var opts = { theme: 'sleepy-rainy-evening', engine: 'google', dir: '' };
+  var lastAction = null;   // para "Reintentar"
+  var busy = false;
+
+  // ---- Ventana ----
+  $('titlebar').addEventListener('mousedown', function (e) {
+    if (e.button === 0 && !e.target.closest('button')) ipc('drag');
+  });
+  $('min').addEventListener('click', function () { ipc('minimize'); });
+  $('close').addEventListener('click', function () { ipc('close'); });
+
+  // ---- Fondo: el tema elegido, con fundido al cambiar ----
+  var backdrop = $('backdrop');
+  function setBackdrop(id) {
+    var theme = data.themes.filter(function (t) { return t.id === id; })[0] || data.themes[0];
+    var current = backdrop.querySelector('.shown');
+    if (current && current.getAttribute('data-id') === theme.id) return;
+    var el = document.createElement(theme.video ? 'video' : 'img');
+    el.setAttribute('data-id', theme.id);
+    if (theme.video) { el.muted = true; el.loop = true; el.playsInline = true; el.autoplay = true; }
+    el.src = '/fondos/' + theme.id;
+    var show = function () {
+      el.classList.add('shown');
+      if (current) { current.classList.remove('shown'); setTimeout(function () { current.remove(); }, 1000); }
+    };
+    el.addEventListener(theme.video ? 'playing' : 'load', show, { once: true });
+    backdrop.appendChild(el);
+  }
+
+  // ---- Pasos (columna izquierda) ----
+  var STEPS = { install: ['Bienvenida', 'Personalizar', 'Instalar', 'Listo'], uninstall: ['Confirmar', 'Desinstalar', 'Listo'] };
+  var CHECK = '<svg viewBox="0 0 12 12"><path d="m2.5 6.2 2.3 2.3 4.7-4.9" /></svg>';
+  function setStep(n) {
+    var list = STEPS[data.mode];
+    $('steps').innerHTML = '';
+    list.forEach(function (name, i) {
+      var li = document.createElement('li');
+      if (i < n) li.className = 'done'; else if (i === n) li.className = 'current';
+      li.innerHTML = '<span class="dot">' + CHECK + '</span>';
+      li.appendChild(document.createTextNode(name));
+      $('steps').appendChild(li);
+    });
+  }
+
+  // ---- Pantallas ----
+  var currentScreen = null;
+  function show(id) {
+    var next = $(id);
+    if (currentScreen === next) return;
+    document.querySelectorAll('.screen.active').forEach(function (prev) {
+      if (prev === next) return;
+      prev.classList.remove('active');
+      prev.classList.add('leaving');
+      setTimeout(function () { prev.classList.remove('leaving'); }, 450);
+    });
+    next.classList.add('active');
+    currentScreen = next;
+    var focus = next.querySelector('.btn.primary, .btn.danger');
+    if (focus) setTimeout(function () { focus.focus(); }, 80);
+  }
+
+  function setBusy(value) {
+    busy = value;
+    $('close').disabled = value;
+  }
+
+  // ---- Personalizar ----
+  var CHECK_BIG = '<svg viewBox="0 0 12 12"><path d="m2.5 6.2 2.3 2.3 4.7-4.9" /></svg>';
+  function buildCustom() {
+    data.themes.forEach(function (t) {
+      var b = document.createElement('button');
+      b.className = 'theme';
+      b.setAttribute('data-id', t.id);
+      b.setAttribute('aria-label', 'Fondo ' + t.label);
+      var media = document.createElement(t.video ? 'video' : 'img');
+      if (t.video) { media.muted = true; media.loop = true; media.playsInline = true; media.autoplay = true; }
+      media.src = '/fondos/' + t.id;
+      b.appendChild(media);
+      var label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = t.label;
+      b.appendChild(label);
+      var check = document.createElement('span');
+      check.className = 'check';
+      check.innerHTML = CHECK_BIG;
+      b.appendChild(check);
+      b.addEventListener('click', function () { opts.theme = t.id; markThemes(); setBackdrop(t.id); });
+      $('themes').appendChild(b);
+    });
+    data.engines.forEach(function (e) {
+      var p = document.createElement('button');
+      p.className = 'pill';
+      p.setAttribute('data-id', e.id);
+      p.textContent = e.label;
+      p.addEventListener('click', function () { opts.engine = e.id; markEngines(); });
+      $('engines').appendChild(p);
+    });
+    markThemes();
+    markEngines();
+    $('kept').hidden = !data.currentTheme && !data.currentEngine;
+  }
+  function markThemes() {
+    document.querySelectorAll('.theme').forEach(function (b) { b.classList.toggle('selected', b.getAttribute('data-id') === opts.theme); });
+  }
+  function markEngines() {
+    document.querySelectorAll('.pill').forEach(function (p) { p.classList.toggle('selected', p.getAttribute('data-id') === opts.engine); });
+  }
+  function setDir(dir) {
+    opts.dir = dir;
+    $('path').textContent = dir;
+    $('path').title = dir;
+  }
+
+  $('go-custom').addEventListener('click', function () { setStep(1); show('custom'); });
+  $('back').addEventListener('click', function () { setStep(0); show('welcome'); });
+  $('pick').addEventListener('click', function () { ipc('pick_dir'); });
+  $('go-install').addEventListener('click', install);
+  $('go-install-2').addEventListener('click', install);
+
+  function install() {
+    lastAction = install;
+    var payload = {
+      dir: opts.dir,
+      desktop: $('opt-desktop').checked,
+      startMenu: $('opt-start').checked,
+      defaultBrowser: $('opt-default').checked,
+      theme: opts.theme,
+      engine: opts.engine,
+    };
+    startProgress();
+    ipc('install', payload);
+  }
+
+  // ---- Desinstalar ----
+  $('cancel-uninstall').addEventListener('click', function () { ipc('close'); });
+  $('do-uninstall').addEventListener('click', uninstall);
+  function uninstall() {
+    lastAction = uninstall;
+    startProgress();
+    ipc('uninstall', { deleteData: $('delete-data').checked });
+  }
+
+  // ---- Progreso ----
+  var CIRC = 2 * Math.PI * 70;
+  $('ring').style.strokeDasharray = CIRC;
+  function setProgress(fraction) {
+    var f = Math.max(0, Math.min(1, fraction));
+    $('ring').style.strokeDashoffset = CIRC * (1 - f);
+    $('pct').textContent = Math.round(f * 100);
+  }
+  function startProgress() {
+    setBusy(true);
+    setProgress(0);
+    $('step').textContent = 'Preparando';
+    $('detail').textContent = '';
+    setStep(data.mode === 'install' ? 2 : 1);
+    show('progress');
+  }
+
+  // ---- Michi abierto / errores ----
+  $('running-close').addEventListener('click', function () { startProgress(); ipc('close_running'); });
+  $('running-cancel').addEventListener('click', function () {
+    setBusy(false);
+    if (data.mode === 'install') { setStep(0); show('welcome'); } else { setStep(0); show('uninstall'); }
+  });
+  $('error-close').addEventListener('click', function () { ipc('close'); });
+  $('error-retry').addEventListener('click', function () { if (lastAction) lastAction(); });
+
+  // ---- Rust -> pagina ----
+  window.app = {
+    init: function (d) {
+      data = d;
+      $('version').textContent = 'Version ' + d.version;
+      setDir(d.defaultDir);
+      if (d.mode === 'uninstall') {
+        $('window-title').textContent = 'Desinstalar Michi';
+        $('uninstall-lead').textContent = d.uninstallDir
+          ? 'Se quitara de ' + d.uninstallDir + ', junto con sus accesos directos y su registro en Windows.'
+          : 'No se encontro una instalacion de Michi.';
+        $('do-uninstall').disabled = !d.uninstallDir;
+        setBackdrop(d.currentTheme || opts.theme);
+        setStep(0);
+        show('uninstall');
+        return;
+      }
+      if (d.currentTheme && d.themes.some(function (t) { return t.id === d.currentTheme; })) opts.theme = d.currentTheme;
+      if (d.currentEngine && d.engines.some(function (e) { return e.id === d.currentEngine; })) opts.engine = d.currentEngine;
+      buildCustom();
+      setBackdrop(opts.theme);
+      var size = d.sizeMb ? ' - ' + d.sizeMb + ' MB' : '';
+      $('welcome-note').textContent = 'Version ' + d.version + size + ' - WebView2 ' + (d.webview2 || '?');
+      if (d.existing) {
+        var same = d.existing.version === d.version;
+        $('welcome-title').innerHTML = same ? 'Michi ya esta <span class="grad">instalado</span>' : 'Actualizar <span class="grad">Michi</span>';
+        $('welcome-lead').textContent = same
+          ? 'La version ' + d.version + ' ya esta en tu equipo. Puedes reinstalarla: tus ajustes, marcadores, historial y extensiones se mantienen.'
+          : 'Tienes la version ' + (d.existing.version || '?') + '; esta es la ' + d.version + '. Tus ajustes, marcadores, historial y extensiones se mantienen.';
+        $('go-install').textContent = same ? 'Reinstalar' : 'Actualizar';
+        $('go-install-2').textContent = same ? 'Reinstalar' : 'Actualizar';
+      }
+      if (!d.hasPayload) {
+        $('welcome-lead').textContent = 'Este instalador no trae los archivos del navegador. Generalo con tools/build_installer.ps1.';
+        $('go-install').disabled = true;
+        $('go-install-2').disabled = true;
+      }
+      setStep(0);
+      show('welcome');
+    },
+    dir: setDir,
+    progress: function (fraction, step, detail) {
+      setProgress(fraction);
+      $('step').textContent = step;
+      $('detail').textContent = detail || '';
+    },
+    done: function () {
+      setBusy(false);
+      setProgress(1);
+      var actions = $('done-actions');
+      actions.innerHTML = '';
+      function button(text, cls, fn) {
+        var b = document.createElement('button');
+        b.className = 'btn ' + cls;
+        b.textContent = text;
+        b.addEventListener('click', fn);
+        actions.appendChild(b);
+      }
+      setStep(STEPS[data.mode].length - 1);
+      if (data.mode === 'uninstall') {
+        $('done-title').textContent = 'Michi se desinstalo';
+        $('done-lead').textContent = $('delete-data').checked
+          ? 'Se borraron el programa y todos tus datos. Gracias por usarlo.'
+          : 'Tus datos quedaron guardados por si lo vuelves a instalar. Gracias por usarlo.';
+        button('Cerrar', 'primary', function () { ipc('close'); });
+      } else {
+        $('done-title').textContent = 'Michi esta listo';
+        $('done-lead').textContent = 'Se instalo en ' + opts.dir + '.';
+        button('Cerrar', 'link', function () { ipc('close'); });
+        if ($('opt-default').checked) button('Hacerlo predeterminado', '', function () { ipc('default_apps'); });
+        button('Abrir Michi', 'primary', function () { ipc('launch'); });
+      }
+      show('done');
+    },
+    error: function (msg) {
+      setBusy(false);
+      $('error-msg').textContent = msg;
+      show('error');
+    },
+    running: function () {
+      setBusy(false);
+      show('running');
+    },
+  };
+
+  ipc('ready');
+})();
+</script>
+</body>
+</html>

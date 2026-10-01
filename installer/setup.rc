@@ -1,0 +1,2 @@
+// Icono del instalador (id 1: lo usa tambien main.rs para la ventana).
+1 ICON "../assets/icon/michi.ico"
