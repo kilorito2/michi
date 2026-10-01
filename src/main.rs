@@ -166,6 +166,15 @@ impl ApplicationHandler<UserEvent> for App {
         // con varios pedidos juntos (clics seguidos en "+") crearlos todos de
         // una congelaba la ventana sin repintar. Entre una y otra el bucle
         // vuelve a procesar eventos (y a dibujar).
+        // Antes que nada las de window.open(): su pagina espera en pausa.
+        let next_window = {
+            let mut st = self.state.borrow_mut();
+            (!st.pending_windows.is_empty()).then(|| st.pending_windows.remove(0))
+        };
+        if let Some(w) = next_window {
+            tabs::open_window(&self.state, w);
+            self.state.borrow().wake();
+        }
         let next_tab = {
             let mut st = self.state.borrow_mut();
             (!st.pending_tabs.is_empty()).then(|| st.pending_tabs.remove(0))

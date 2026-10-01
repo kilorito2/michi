@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use webview2_com::Microsoft::Web::WebView2::Win32::{
+    ICoreWebView2Deferral, ICoreWebView2Environment, ICoreWebView2NewWindowRequestedEventArgs,
+};
 use winit::event_loop::EventLoopProxy;
 use winit::window::Window;
 use wry::WebView;
@@ -149,6 +152,21 @@ pub enum Action {
     CloseTab(u64),
 }
 
+/// Una ventana que abrio una pagina con window.open(), esperando su pestana.
+/// La pagina queda en pausa (deferral) hasta que la pestana existe y se la
+/// entregamos al motor como la ventana nueva (SetNewWindow): asi conserva su
+/// window.opener, como en Chrome. Los inicios de sesion en ventana emergente
+/// ("Continuar con Google" en claude.ai, por ejemplo) devuelven el resultado
+/// a la pagina que los abrio por ahi; sin opener se quedaban en blanco.
+/// La pestana se crea en la proxima vuelta del bucle (ver request_tab).
+pub struct PendingWindow {
+    pub url: String,
+    pub args: ICoreWebView2NewWindowRequestedEventArgs,
+    pub deferral: ICoreWebView2Deferral,
+    /// El de la pagina que la abre: WebView2 exige el mismo.
+    pub environment: ICoreWebView2Environment,
+}
+
 /// Popup de extension abierto (ver popup.rs).
 pub struct ExtPopup {
     pub id: String,
@@ -242,6 +260,8 @@ pub struct AppState {
     pub proxy: Option<EventLoopProxy<UserEvent>>,
     /// Pestanas pedidas (URL) que todavia no se crearon. Ver request_tab.
     pub pending_tabs: Vec<String>,
+    /// window.open() de una pagina, esperando su pestana (ver PendingWindow).
+    pub pending_windows: Vec<PendingWindow>,
     /// Acciones diferidas a la proxima vuelta del bucle (ver Action).
     pub actions: Vec<Action>,
 
@@ -299,6 +319,7 @@ impl AppState {
             right: PanelState::new(),
             proxy: None,
             pending_tabs: Vec::new(),
+            pending_windows: Vec::new(),
             actions: Vec::new(),
             downloads: Vec::new(),
             history: storage::load(storage::HISTORY_FILE),

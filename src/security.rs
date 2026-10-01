@@ -34,7 +34,7 @@ use windows_core::{Interface, BOOL};
 use wry::{WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
 
 use crate::native::{self, read_pwstr, ClearKinds};
-use crate::state::{is_own_page, own_page_path, Action, AppState, Shared, INSECURE_URL};
+use crate::state::{is_own_page, own_page_path, Action, AppState, PendingWindow, Shared, INSECURE_URL};
 use crate::{protocol, storage, sync};
 
 /// Argumentos del motor. Tienen que ser LOS MISMOS en todos los WebView:
@@ -579,14 +579,20 @@ fn on_certificate_error(state: &Shared, core: &ICoreWebView2, id: u64) {
 }
 
 /// window.open y enlaces target=_blank. Nunca una ventana del sistema: una
-/// pestana nueva, sin relacion con la pagina que la abrio (window.opener es
-/// null, asi que esa pagina no puede redirigir la pestana nueva). Si la abre
-/// un clic del usuario, se abre siempre; si la pagina la abre por su cuenta,
-/// solo si no estan bloqueadas las ventanas emergentes (si lo estan, queda
-/// anotada para abrirla desde el escudo de la barra).
+/// pestana nueva. Si la abre un clic del usuario, se abre siempre; si la
+/// pagina la abre por su cuenta, solo si no estan bloqueadas las ventanas
+/// emergentes (si lo estan, queda anotada para abrirla desde el escudo de la
+/// barra, ya sin relacion con la pagina).
+///
+/// La pestana se le entrega al motor como la ventana nueva (ver
+/// state::PendingWindow), igual que en Chrome: window.open() devuelve esa
+/// ventana y ella ve a su window.opener, que es como los inicios de sesion
+/// en ventana emergente (Google, Apple, Microsoft...) le devuelven el
+/// resultado a la pagina. Los enlaces target=_blank y los rel=noopener
+/// siguen sin opener: eso lo decide el motor, como en Chrome.
 fn on_new_window(state: &Shared, core: &ICoreWebView2, id: u64) {
     let s = state.clone();
-    let handler = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
+    let handler = NewWindowRequestedEventHandler::create(Box::new(move |sender, args| {
         let Some(args) = args else { return Ok(()) };
         let uri = unsafe { read_pwstr(|p| args.Uri(p)) };
         let mut user = BOOL(0);
@@ -603,7 +609,17 @@ fn on_new_window(state: &Shared, core: &ICoreWebView2, id: u64) {
         let blocked = {
             let mut st = s.borrow_mut();
             if user.as_bool() || !st.settings.block_popups {
-                st.request_tab(&uri);
+                // Sin el entorno (no deberia pasar) va como pestana suelta.
+                let environment = sender
+                    .and_then(|c| c.cast::<ICoreWebView2_2>().ok())
+                    .and_then(|c| unsafe { c.Environment() }.ok());
+                match (environment, unsafe { args.GetDeferral() }) {
+                    (Some(environment), Ok(deferral)) => {
+                        st.pending_windows.push(PendingWindow { url: uri, args: args.clone(), deferral, environment });
+                        st.wake();
+                    }
+                    _ => st.request_tab(&uri),
+                }
                 false
             } else {
                 eprintln!("[seguridad] ventana emergente bloqueada: {uri}");

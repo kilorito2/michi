@@ -3,9 +3,10 @@
 //! los que bloquean ser mostrados dentro de un iframe.
 
 use wry::dpi::{LogicalPosition, LogicalSize};
-use wry::{PageLoadEvent, Rect};
+use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2Environment};
+use wry::{PageLoadEvent, Rect, WebViewBuilderExtWindows, WebViewExtWindows};
 
-use crate::state::{is_own_page, HistoryEntry, Shared, Tab, EDGE_IDLE, HOME_URL, TOPBAR_H};
+use crate::state::{is_own_page, HistoryEntry, PendingWindow, Shared, Tab, EDGE_IDLE, HOME_URL, TOPBAR_H};
 use crate::storage::HISTORY_MAX;
 use crate::{downloads, layout, permissions, security, shortcuts, sync};
 
@@ -24,7 +25,29 @@ pub fn is_bookmarkable(url: &str) -> bool {
 }
 
 pub fn open_tab(state: &Shared, url: &str) {
+    let _ = create_tab(state, url, None);
+}
+
+/// window.open() de una pagina (ver state::PendingWindow): la pestana nace
+/// sin navegar, en el entorno de la pagina que la abre, y se la entregamos
+/// al motor como la ventana nueva; el motor la lleva a `url`.
+pub fn open_window(state: &Shared, w: PendingWindow) {
+    let core = create_tab(state, &w.url, Some(w.environment));
+    unsafe {
+        // Sin pestana, window.open() devuelve null (como con un bloqueador).
+        if let Some(core) = &core {
+            let _ = w.args.SetNewWindow(core);
+        }
+        let _ = w.args.SetHandled(true);
+        let _ = w.deferral.Complete();
+    }
+}
+
+/// Crea la pestana y la deja al frente. Con `environment` es una ventana de
+/// window.open(): no navega (eso lo hace el motor despues de SetNewWindow).
+fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Environment>) -> Option<ICoreWebView2> {
     let id = state.borrow_mut().alloc_id();
+    let is_window = environment.is_some();
 
     // Clonamos el Rc<Window> y soltamos el prestamo de `state` de inmediato:
     // construir el WebView puede disparar callbacks (on_page_load, etc.) de
@@ -52,8 +75,11 @@ pub fn open_tab(state: &Shared, url: &str) {
         // Navegacion, ventanas nuevas, certificados, permisos...: ver
         // security::attach_tab y permissions::attach, que se enganchan
         // apenas se crea (antes del primer evento de la navegacion inicial).
-        security::app_builder()
-            .with_url(url)
+        let builder = match environment {
+            Some(env) => security::app_builder().with_environment(env),
+            None => security::app_builder().with_url(url),
+        };
+        builder
             // Nace oculta: un WebView nuevo queda arriba de todo en el orden de
             // apilamiento, y hasta que relayout (en `activated`) lo ubica y
             // vuelve a subir la interfaz, tapaba la barra y los paneles — con
@@ -131,7 +157,15 @@ pub fn open_tab(state: &Shared, url: &str) {
                 sync::push_tabs(&state_load);
             })
             .build_as_child(window.as_ref())
-            .expect("no se pudo crear el webview de la pestana")
+    };
+    let webview = match webview {
+        Ok(webview) => webview,
+        // Una pagina que abre una ventana no puede tirar abajo el navegador.
+        Err(e) if is_window => {
+            eprintln!("[pestanas] no se pudo crear la ventana de window.open: {e}");
+            return None;
+        }
+        Err(e) => panic!("no se pudo crear el webview de la pestana: {e}"),
     };
 
     security::attach_tab(state, &webview, id);
@@ -145,6 +179,7 @@ pub fn open_tab(state: &Shared, url: &str) {
         let _ = webview.zoom(zoom);
     }
 
+    let core = webview.webview();
     {
         let mut st = state.borrow_mut();
         st.tabs.push(Tab {
@@ -160,6 +195,7 @@ pub fn open_tab(state: &Shared, url: &str) {
     }
 
     activated(state);
+    Some(core)
 }
 
 /// La direccion tambien cambia SIN cargar una pagina nueva: los sitios que
