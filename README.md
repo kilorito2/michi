@@ -7,7 +7,7 @@
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-2021-CE422B?style=for-the-badge&logo=rust&logoColor=white)
 ![WebView2](https://img.shields.io/badge/Motor-WebView2%20(Chromium)-0A7CFF?style=for-the-badge&logo=microsoftedge&logoColor=white)
-![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.0-ff7a1a?style=for-the-badge)
+![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.1-ff7a1a?style=for-the-badge)
 ![Licencia MIT](https://img.shields.io/badge/licencia-MIT-8b7bff?style=for-the-badge)
 
 ### [Descargar el instalador](https://github.com/kilorito2/michi/releases/latest)
@@ -349,7 +349,7 @@ Michi tiene su propio instalador, hecho con la misma base que el navegador
 y con su misma estética: el **fondo animado detrás del vidrio** (que cambia en
 vivo al elegir otro), el zorro y los colores de su degradado.
 
-**Descarga:** `Michi-Setup-0.1.0.exe` en
+**Descarga:** `Michi-Setup-0.1.1.exe` en
 [Releases](https://github.com/kilorito2/michi/releases/latest). No está firmado
 digitalmente, así que Windows puede mostrar el aviso de SmartScreen la primera
 vez: *Más información › Ejecutar de todas formas*.
