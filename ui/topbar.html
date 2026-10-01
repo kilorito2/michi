@@ -1,0 +1,454 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root{
+    --glass-bg: rgba(255,255,255,0.10);
+    --glass-bg-strong: rgba(255,255,255,0.16);
+    --glass-border: rgba(255,255,255,0.22);
+    --text: #f3f4fb;
+    --text-dim: rgba(243,244,251,0.55);
+    --accent: #8b7bff;
+    --accent-2: #5ad1e6;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100vw; height: 100vh;
+    background: transparent;
+    overflow: hidden;
+    font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    user-select: none;
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    padding: 0 10px;
+    background: linear-gradient(180deg, rgba(30,28,46,0.55), rgba(20,18,34,0.45));
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 15px;
+    flex: none;
+    transition: background .15s ease, border-color .15s ease, opacity .15s ease;
+  }
+  .btn:hover { background: var(--glass-bg); border-color: var(--glass-border); }
+  .btn:active { background: var(--glass-bg-strong); }
+  .btn[disabled] { opacity: .3; cursor: default; pointer-events: none; }
+  .btn.spin { animation: spin 0.9s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* Espacio vacio a cada lado de la barra de direcciones: aqui es donde se
+     puede arrastrar la ventana (no hay barra de titulo nativa). Sin esto,
+     los botones y la barra de direcciones cubren el 100% del ancho y no
+     queda superficie libre para mover la ventana. */
+  .drag-spacer { flex: 1 1 auto; height: 100%; min-width: 12px; }
+
+  .addr-wrap {
+    flex: 1 1 auto;
+    max-width: 720px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    min-width: 0;
+  }
+  .addr-wrap:focus-within { border-color: var(--accent); background: var(--glass-bg-strong); }
+
+  /* Estado de la conexion, a la izquierda de la direccion (ver
+     security::indicator): candado si es HTTPS, "No seguro" si no. */
+  .sec {
+    flex: none; display: flex; align-items: center; gap: 5px;
+    height: 22px; padding: 0 7px; margin-left: -7px; border-radius: 999px;
+    color: var(--text-dim); font-size: 12px; white-space: nowrap;
+  }
+  /* El icono como caja propia (no en linea con el texto): en linea se apoya
+     sobre la linea base y queda corrido hacia arriba por el hueco de los
+     descendentes. */
+  #sec-icon { display: flex; }
+  .sec svg { display: block; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .sec[data-state="secure"] { color: #7cf29c; }
+  .sec[data-state="insecure"] { color: #ffd166; background: rgba(255,209,102,0.12); }
+  .sec[data-state="dangerous"] { color: var(--danger); background: rgba(255,107,107,0.16); }
+  .sec-label:empty { display: none; }
+
+  /* La direccion con el dominio resaltado y el resto atenuado (y sin un
+     usuario:clave@ delante, que puede disfrazar el dominio real): se ve
+     cuando no se esta escribiendo, encima del input transparente. */
+  .url-box { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; }
+  #url {
+    flex: 1; min-width: 0; width: 100%; padding: 0;
+    background: transparent; border: none; outline: none;
+    color: var(--text); font-family: inherit; font-size: 13px;
+    user-select: text;
+  }
+  #url::placeholder { color: var(--text-dim); }
+  .url-view {
+    position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+    font-size: 13px; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    pointer-events: none; display: none;
+  }
+  .url-view .host { color: var(--text); }
+  .addr-wrap.show-view .url-view { display: block; }
+  .addr-wrap.show-view #url { color: transparent; }
+
+  /* Escudo: la pagina intento algo que se le bloqueo (ventana emergente,
+     abrir una aplicacion externa). */
+  .shield {
+    flex: none; width: 24px; height: 24px; margin-right: -6px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center; color: #ffd166;
+  }
+  .shield.clickable { cursor: pointer; }
+  .shield.clickable:hover { background: var(--glass-bg-strong); }
+  .shield svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .shield[hidden] { display: none; }
+  /* Icono dibujado y no el caracter "+", que la fuente deja fuera del centro. */
+  .new-tab svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+
+  /* Estrella de marcador, dentro de la barra de direcciones. */
+  .star {
+    flex: none; width: 24px; height: 24px; margin-right: -6px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-dim);
+    transition: background .15s ease, color .15s ease, transform .15s ease;
+  }
+  .star:hover { background: var(--glass-bg-strong); color: var(--text); }
+  .star:active { transform: scale(.88); }
+  .star svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+  .star.on { color: #ffd166; }
+  .star.on svg { fill: currentColor; }
+  .star[hidden] { display: none; }
+
+  /* "Agregar a Michi" en paginas de Chrome Web Store / Edge Add-ons. */
+  .store-btn {
+    flex: none; height: 24px; padding: 0 10px; margin-right: -6px; border-radius: 999px;
+    border: none; background: var(--accent); color: #fff; font: inherit; font-size: 12px; cursor: pointer;
+    white-space: nowrap; transition: background .15s ease, transform .15s ease;
+  }
+  .store-btn:hover { background: #9a8cff; }
+  .store-btn:active { transform: scale(.96); }
+  .store-btn[disabled] { opacity: .7; cursor: default; }
+  .store-btn[hidden] { display: none; }
+  .menu-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+  /* Iconos de extensiones (ver src/popup.rs). */
+  .ext-bar { display: flex; gap: 2px; flex: none; }
+  .ext-bar:empty { display: none; }
+  .ext-btn img { width: 18px; height: 18px; object-fit: contain; pointer-events: none; }
+  .ext-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+  .win-controls { display: flex; gap: 4px; }
+  .win-controls .btn { width: 30px; }
+  .win-controls .btn.close:hover { background: var(--danger); }
+</style>
+</head>
+<body>
+  <div class="bar" id="bar">
+    <div class="btn" id="back" title="Atras">&#8592;</div>
+    <div class="btn" id="fwd" title="Adelante">&#8594;</div>
+    <div class="btn" id="reload" title="Recargar">&#8635;</div>
+
+    <div class="drag-spacer"></div>
+
+    <div class="addr-wrap" id="addr">
+      <div class="sec" id="sec" data-state="internal"><span id="sec-icon"></span><span class="sec-label" id="sec-label"></span></div>
+      <div class="url-box">
+        <input id="url" spellcheck="false" placeholder="Buscar o escribir una direccion web" />
+        <div class="url-view" id="url-view" aria-hidden="true"></div>
+      </div>
+      <div class="shield" id="shield" hidden>
+        <svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6z"/><path d="m9.5 9.5 5 5M14.5 9.5l-5 5"/></svg>
+      </div>
+      <button class="store-btn" id="store" hidden title="Instalar esta extension">Agregar a Michi</button>
+      <div class="star" id="star" title="Agregar a marcadores (Ctrl+D)" hidden>
+        <svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>
+      </div>
+    </div>
+
+    <div class="drag-spacer"></div>
+
+    <div class="ext-bar" id="ext-bar"></div>
+    <div class="btn new-tab" id="new-tab" title="Nueva pestana (Ctrl+T)">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+    </div>
+    <div class="btn menu-btn" id="menu" title="Menu (Alt+F)">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+    </div>
+
+    <div class="win-controls">
+      <div class="btn" id="min" title="Minimizar">&#8211;</div>
+      <div class="btn" id="max" title="Maximizar">&#9723;</div>
+      <div class="btn close" id="close" title="Cerrar">&#10005;</div>
+    </div>
+  </div>
+
+<script src="/wallpaper.js" data-variant="blur"></script>
+<script>
+(function () {
+  // Envuelto en IIFE: el motor puede volver a ejecutar este script sobre el
+  // mismo documento (p. ej. al fijar with_html en Windows), y sin esto las
+  // declaraciones de nivel superior (const/function) chocarian la segunda vez.
+  function ipc(cmd, extra) {
+    window.ipc.postMessage(JSON.stringify(Object.assign({ cmd }, extra || {})));
+  }
+
+  const bar = document.getElementById('bar');
+  bar.addEventListener('mousedown', (e) => {
+    // Arrastra la ventana salvo que el clic haya sido sobre un control
+    // interactivo (boton o barra de direcciones).
+    if (!e.target.closest('.btn, .addr-wrap, .store-btn')) ipc('drag_window');
+  });
+
+  document.getElementById('back').addEventListener('click', () => ipc('back'));
+  document.getElementById('fwd').addEventListener('click', () => ipc('forward'));
+  document.getElementById('reload').addEventListener('click', () => ipc('reload'));
+  document.getElementById('new-tab').addEventListener('click', () => ipc('new_tab'));
+  document.getElementById('min').addEventListener('click', () => ipc('minimize'));
+  document.getElementById('max').addEventListener('click', () => ipc('toggle_maximize'));
+  document.getElementById('close').addEventListener('click', () => ipc('close'));
+  document.getElementById('menu').addEventListener('click', () => ipc('toggle_menu'));
+  document.getElementById('star').addEventListener('click', () => ipc('toggle_bookmark'));
+  document.getElementById('store').addEventListener('click', () => ipc('install_from_store'));
+
+  const urlInput = document.getElementById('url');
+  const addr = document.getElementById('addr');
+  const view = document.getElementById('url-view');
+
+  // Ctrl+L / Alt+D (ver src/shortcuts.rs): Rust le da el foco a este WebView
+  // y nos pide pasarlo a la barra de direcciones con todo seleccionado.
+  window.focusAddress = function () {
+    urlInput.focus();
+    urlInput.select();
+  };
+
+  // Mientras el usuario tiene el foco en la barra de direcciones no debemos
+  // pisarle lo que esta escribiendo (antes se inferia con "hay texto?", lo
+  // que fallaba si borraba todo con Backspace mientras seguia editando).
+  // Escribiendo se ve la direccion completa, tal cual (sin el resaltado).
+  let editing = false;
+
+  // Sugerencias (ver src/suggest.rs y ui/suggest.html): el desplegable es otro
+  // WebView, pero el foco se queda aca; Rust sabe que hay en la lista.
+  let suggestOpen = false;
+  function suggest(text, deleting) {
+    const r = addr.getBoundingClientRect();
+    ipc('suggest_input', { text: text, deleting: !!deleting, x: r.left, w: r.width });
+  }
+
+  urlInput.addEventListener('focus', () => {
+    editing = true;
+    addr.classList.remove('show-view');
+    // Entrando con el teclado (no con un clic, que lo resuelve en mouseup):
+    // toda la direccion seleccionada, asi escribir la reemplaza.
+    if (!selectOnUp) urlInput.select();
+    // Al entrar: los sitios mas visitados (como Firefox).
+    suggest('', false);
+  });
+  urlInput.addEventListener('blur', () => {
+    editing = false;
+    suggestOpen = false;
+    ipc('suggest_close');
+    ipc('ready'); // repinta la barra con la URL real (por si quedo texto a medio escribir)
+  });
+
+  // El primer clic en la barra selecciona toda la direccion (escribir la
+  // reemplaza); los siguientes ubican el cursor, como en cualquier navegador.
+  let selectOnUp = false;
+  urlInput.addEventListener('mousedown', () => { selectOnUp = document.activeElement !== urlInput; });
+  urlInput.addEventListener('mouseup', (e) => {
+    if (selectOnUp && urlInput.selectionStart === urlInput.selectionEnd) {
+      e.preventDefault();
+      urlInput.select();
+    }
+    selectOnUp = false;
+  });
+
+  urlInput.addEventListener('input', (e) => {
+    suggest(urlInput.value, e.inputType && e.inputType.indexOf('delete') === 0);
+  });
+
+  urlInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      // Rust abre la sugerencia elegida, o decide si lo escrito es una
+      // direccion o una busqueda (ver storage::resolve_input).
+      ipc('suggest_enter', { input: urlInput.value });
+      urlInput.blur();
+    } else if (e.key === 'Escape') {
+      urlInput.blur();
+    } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && suggestOpen) {
+      e.preventDefault();
+      ipc('suggest_key', { delta: e.key === 'ArrowDown' ? 1 : -1 });
+    }
+  });
+
+  window.onSuggestOpen = function (open) { suggestOpen = open && editing; };
+
+  // Con las flechas: el texto de la fila elegida en la barra.
+  window.onSuggestFill = function (text) {
+    if (!editing) return;
+    urlInput.value = text;
+    urlInput.setSelectionRange(text.length, text.length);
+  };
+
+  // Completar en linea: "y" -> "youtube.com/", con lo agregado seleccionado
+  // (seguir escribiendo lo reemplaza). Solo si la barra sigue con lo que se
+  // escribio cuando se pidio y el cursor esta al final.
+  window.onSuggestAutofill = function (d) {
+    const v = urlInput.value;
+    if (!editing || v !== d.query || urlInput.selectionStart !== v.length) return;
+    if (d.fill.length <= v.length || d.fill.toLowerCase().indexOf(v.toLowerCase()) !== 0) return;
+    urlInput.value = v + d.fill.slice(v.length);
+    urlInput.setSelectionRange(v.length, urlInput.value.length);
+  };
+
+  // Se eligio una sugerencia con el mouse.
+  window.onSuggestDone = function () { urlInput.blur(); };
+
+  // Estado de la conexion (ver security::indicator): icono, texto y explicacion.
+  const WARN = '<svg viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.2h.01"/></svg>';
+  const SEC = {
+    secure: ['<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+      '', 'Conexion segura (HTTPS)'],
+    insecure: [WARN, 'No seguro',
+      'La conexion con este sitio no esta cifrada (HTTP): alguien en tu red podria ver o cambiar lo que envias. No escribas contrasenas ni datos de pago.'],
+    dangerous: [WARN, 'No seguro',
+      'El certificado de este sitio no es valido: alguien podria estar haciendose pasar por el. No escribas contrasenas ni datos de pago.'],
+    file: ['<svg viewBox="0 0 24 24"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/></svg>', '', 'Archivo de este equipo'],
+    extension: ['<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 12h6M12 9v6"/></svg>',
+      '', 'Pagina de una extension'],
+    other: ['<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>', '', ''],
+    internal: ['<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>', '', ''],
+  };
+
+  // La direccion con el dominio resaltado. new URL() da el dominio en su
+  // forma ASCII (xn--...): un dominio con letras de otro alfabeto que imitan
+  // a las latinas ("apple" con letras cirilicas) no se ve como el original.
+  function showUrl(url, security) {
+    view.textContent = '';
+    let u = null;
+    if (security !== 'internal') {
+      try { u = new URL(url); } catch (e) { u = null; }
+    }
+    if (!u || !u.host) {
+      addr.classList.remove('show-view');
+      return;
+    }
+    function part(cls, text) {
+      if (!text) return;
+      const span = document.createElement('span');
+      span.className = cls;
+      span.textContent = text;
+      view.appendChild(span);
+    }
+    // https:// lo dice el candado; cualquier otro esquema se muestra.
+    part('', u.protocol === 'https:' ? '' : u.protocol + '//');
+    part('host', u.host);
+    const rest = u.pathname + u.search + u.hash;
+    part('', rest === '/' ? '' : rest);
+    addr.classList.toggle('show-view', !editing);
+  }
+
+  // Escudo: lo que se le bloqueo a la pagina (ver security::Blocked).
+  const shield = document.getElementById('shield');
+  let blockedPopup = false;
+  function showBlocked(items) {
+    shield.hidden = !items.length;
+    const popups = items.filter((b) => b.kind === 'popup');
+    const apps = items.filter((b) => b.kind === 'app');
+    blockedPopup = popups.length > 0;
+    shield.classList.toggle('clickable', blockedPopup);
+    const lines = [];
+    if (popups.length) {
+      lines.push((popups.length === 1 ? 'Se bloqueo una ventana emergente' : 'Se bloquearon ' + popups.length + ' ventanas emergentes') +
+        ': ' + popups[popups.length - 1].target + '\nClic para abrir' + (popups.length === 1 ? 'la.' : ' la ultima.'));
+    }
+    if (apps.length) {
+      const names = apps.map((a) => a.target).filter((v, i, all) => all.indexOf(v) === i);
+      lines.push('Se bloqueo un intento de abrir una aplicacion externa (' + names.join(', ') + ').');
+    }
+    shield.title = lines.join('\n\n');
+  }
+  shield.addEventListener('click', () => { if (blockedPopup) ipc('open_blocked_popup'); });
+
+  // Rust -> UI: estado de la pestana activa
+  window.onActiveTab = function (data) {
+    // "internal" = nuestras paginas (pestana nueva, ajustes): la barra queda
+    // vacia. Lo decide Rust comparando el origen exacto (state::is_own_page).
+    if (!editing) {
+      urlInput.value = data.security === 'internal' ? '' : data.url;
+      showUrl(data.url, data.security);
+    }
+    const sec = document.getElementById('sec');
+    const info = SEC[data.security] || SEC.other;
+    sec.setAttribute('data-state', data.security);
+    document.getElementById('sec-icon').innerHTML = info[0];
+    document.getElementById('sec-label').textContent = info[1];
+    sec.title = info[2];
+    showBlocked(data.blocked || []);
+    document.getElementById('back').toggleAttribute('disabled', !data.canGoBack);
+    document.getElementById('fwd').toggleAttribute('disabled', !data.canGoForward);
+    // No hay forma de cancelar una carga en curso (la libreria no lo expone),
+    // asi que en vez de simular un boton "detener" que no haria nada,
+    // mostramos el mismo icono de recargar girando mientras carga.
+    document.getElementById('reload').classList.toggle('spin', !!data.loading);
+
+    const star = document.getElementById('star');
+    star.hidden = !data.canBookmark;
+    star.classList.toggle('on', !!data.bookmarked);
+    star.title = data.bookmarked ? 'Quitar de marcadores (Ctrl+D)' : 'Agregar a marcadores (Ctrl+D)';
+
+    // Mientras se instala, el boton muestra el progreso en vez de "Agregar".
+    const store = document.getElementById('store');
+    const busy = /\.\.\.$/.test(data.extensionStatus || '');
+    store.hidden = !data.storeExtension;
+    store.disabled = busy;
+    store.textContent = busy ? data.extensionStatus : 'Agregar a Michi';
+    store.title = data.extensionStatus || 'Instalar esta extension';
+  };
+
+  window.onExtensionToolbar = function (items) {
+    const bar = document.getElementById('ext-bar');
+    bar.innerHTML = '';
+    items.forEach((x) => {
+      const b = document.createElement('div');
+      b.className = 'btn ext-btn';
+      b.title = x.name;
+      if (x.icon) {
+        const img = document.createElement('img');
+        img.alt = '';
+        // URL ya armada por Rust, con la clave de la sesion (ver protocol::icon_url).
+        img.src = x.icon;
+        b.appendChild(img);
+      } else {
+        b.innerHTML = '<svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/></svg>';
+      }
+      b.addEventListener('click', () => {
+        ipc('ext_popup', { id: x.id, right: b.getBoundingClientRect().right });
+      });
+      bar.appendChild(b);
+    });
+  };
+
+  window.onMaximized = function (isMax) {
+    document.getElementById('max').innerHTML = isMax ? '&#10064;' : '&#9723;';
+  };
+
+  ipc('ready');
+})();
+</script>
+</body>
+</html>

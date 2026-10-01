@@ -1,0 +1,21 @@
+# Mitigaciones de explotacion del compilador y el enlazador, como las de los
+# navegadores grandes (ver README > Seguridad):
+# - Control Flow Guard: una llamada indirecta solo puede saltar al comienzo
+#   de una funcion valida, no a cualquier lugar que un atacante elija.
+# - /CETCOMPAT: el proceso usa las pilas sombra por hardware del procesador
+#   (Intel CET / AMD shadow stack) donde existan: una direccion de retorno
+#   pisada en la pila ya no sirve para desviar la ejecucion.
+# - /DEPENDENTLOADFLAG:0x800: las DLL que importa el .exe se cargan solo de
+#   System32. Sin esto, un instalador abierto desde Descargas cargaria un
+#   dwmapi.dll o uxtheme.dll que alguien haya dejado en esa misma carpeta.
+# - crt-static: el runtime de C va dentro del .exe. Si no, los dos programas
+#   necesitan vcruntime140.dll (del "Visual C++ Redistributable"), que no
+#   viene con Windows: en una PC sin el no arrancarian.
+# (DEP y ASLR ya vienen activados por defecto en Rust para Windows.)
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    "-C", "control-flow-guard",
+    "-C", "link-arg=/CETCOMPAT",
+    "-C", "link-arg=/DEPENDENTLOADFLAG:0x800",
+    "-C", "target-feature=+crt-static",
+]

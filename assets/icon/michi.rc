@@ -1,0 +1,33 @@
+// Recursos del .exe (ver build.rs). El id 1 es el que usa main.rs para el
+// icono de la ventana (Icon::from_resource) y el que muestra el Explorador.
+1 ICON "michi.ico"
+
+// Informacion de version: sin esto, Windows muestra el nombre del archivo
+// ("michi.exe") en "Aplicaciones predeterminadas" y en "Abrir con". Con
+// FileDescription/ProductName = "Michi", aparece como "Michi" a secas.
+// NOTA: al cambiar la version en Cargo.toml, actualizar los 4 numeros de aca.
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS 0x40004L
+FILETYPE 0x1L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Michi"
+            VALUE "FileDescription", "Michi"
+            VALUE "FileVersion", "0.1.0.0"
+            VALUE "InternalName", "Michi"
+            VALUE "LegalCopyright", "Michi"
+            VALUE "OriginalFilename", "michi.exe"
+            VALUE "ProductName", "Michi"
+            VALUE "ProductVersion", "0.1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

@@ -1,0 +1,198 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root{
+    --glass-bg: rgba(255,255,255,0.09);
+    --glass-bg-strong: rgba(255,255,255,0.17);
+    --glass-border: rgba(255,255,255,0.20);
+    --text: #f3f4fb;
+    --text-dim: rgba(243,244,251,0.55);
+    --accent: #8b7bff;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100vw; height: 100vh;
+    background: transparent;
+    overflow: hidden;
+    font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    user-select: none;
+  }
+  /* El WebView de este panel mide siempre PANEL_W (300px) y se desliza por
+     encima de la pagina: cerrado queda casi entero fuera de la ventana y
+     solo asoma su franja de 10px del lado de adentro, con el "grip" (ver
+     src/layout.rs y src/panels.rs). El cajon de vidrio ocupa todo el WebView. */
+  .surface {
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(26,24,42,0.62), rgba(16,15,28,0.58));
+    border-left: 1px solid var(--glass-border);
+  }
+
+  .grip-zone {
+    position: absolute; top: 0; bottom: 0; left: 0; width: 10px;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity .16s ease;
+  }
+  .grip { width: 4px; height: 64px; border-radius: 4px; background: rgba(255,255,255,0.28); }
+  .surface.expanded .grip-zone { opacity: 0; }
+
+  /* El contenido se funde mientras el cajon entra/sale. */
+  .panel {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    padding: 10px 8px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .12s ease;
+  }
+  .surface.expanded .panel {
+    opacity: 1;
+    pointer-events: auto;
+    transition: opacity .24s ease .05s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .panel, .surface.expanded .panel { transition: none; }
+  }
+
+  .head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 10px; }
+  .head h1 { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-dim); margin: 0; }
+  .add-btn {
+    width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--text); cursor: pointer; font-size: 16px;
+    transition: background .15s ease, transform .15s ease;
+  }
+  /* Icono dibujado y no el caracter "+": el glifo de la fuente queda corrido
+     segun sus metricas (se veia fuera del centro del boton). */
+  .add-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .add-btn:hover { background: var(--glass-bg-strong); }
+  .add-btn:active { transform: scale(.92); }
+
+  .list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  .list::-webkit-scrollbar { width: 6px; }
+  .list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+
+  .tab-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 8px;
+    border-radius: 10px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    position: relative;
+    transition: background .15s ease, border-color .15s ease;
+  }
+  .tab-row:hover { background: var(--glass-bg); }
+  .tab-row.active { background: var(--glass-bg-strong); border-color: var(--accent); }
+  /* Ranura fija de 16px para el icono, sea el favicon del sitio o el punto. */
+  .tab-ico { width: 16px; height: 16px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .tab-ico img { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; }
+  .tab-ico .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .tab-row.active .tab-ico .dot { background: #7cf29c; }
+  .tab-title { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tab-close {
+    flex: none; width: 18px; height: 18px; border-radius: 6px;
+    display: none; align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 12px;
+  }
+  .tab-row:hover .tab-close { display: flex; }
+  .tab-close:hover { background: var(--danger); color: white; }
+</style>
+</head>
+<body>
+  <div class="surface" id="surface">
+    <div class="grip-zone"><div class="grip"></div></div>
+    <div class="panel">
+      <div class="head">
+        <h1>Pestanas</h1>
+        <div class="add-btn" id="add" title="Nueva pestana (Ctrl+T)">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+      </div>
+      <div class="list" id="list"></div>
+    </div>
+  </div>
+
+<script src="/wallpaper.js" data-variant="blur"></script>
+<script>
+(function () {
+  // Envuelto en IIFE: el motor puede volver a ejecutar este script sobre el
+  // mismo documento, y sin esto las declaraciones de nivel superior chocarian.
+  function ipc(cmd, extra) {
+    window.ipc.postMessage(JSON.stringify(Object.assign({ cmd }, extra || {})));
+  }
+
+  document.getElementById('add').addEventListener('click', () => ipc('new_tab'));
+
+  // Solo avisamos cuando el cursor ENTRA: cerrar el panel lo decide Rust
+  // mirando la posicion real del cursor (ver src/panels.rs). mouseleave no
+  // es fiable en un WebView2 que cambia de tamano debajo del cursor, y
+  // perder uno solo (moviendo el mouse rapido) dejaba el panel abierto.
+  // `expanded` es nuestra copia del estado real, que Rust nos confirma con
+  // window.onExpanded; sirve para no mandar un IPC por cada mousemove.
+  let expanded = false;
+  const surface = document.getElementById('surface');
+
+  function markInside() {
+    if (expanded) return;
+    expanded = true;
+    surface.classList.add('expanded');
+    ipc('expand_right', { value: true });
+  }
+  document.addEventListener('mouseenter', markInside);
+  document.addEventListener('mousemove', markInside);
+
+  window.onExpanded = function (value) {
+    expanded = value;
+    surface.classList.toggle('expanded', value);
+  };
+
+  window.onTabs = function (tabs) {
+    const list = document.getElementById('list');
+    list.innerHTML = '';
+    tabs.forEach((t) => {
+      const row = document.createElement('div');
+      row.className = 'tab-row' + (t.active ? ' active' : '');
+      row.addEventListener('click', () => ipc('switch_tab', { id: t.id }));
+
+      const ico = document.createElement('div');
+      ico.className = 'tab-ico';
+      function showDot() {
+        ico.innerHTML = '';
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        ico.appendChild(dot);
+      }
+      if (t.favicon) {
+        const img = document.createElement('img');
+        img.alt = '';
+        // Si el data URL no es una imagen valida, cae al punto.
+        img.addEventListener('error', showDot);
+        img.src = t.favicon;
+        ico.appendChild(img);
+      } else {
+        showDot();
+      }
+
+      const title = document.createElement('div');
+      title.className = 'tab-title';
+      title.textContent = t.title && t.title.length ? t.title : 'Nueva pestana';
+
+      const close = document.createElement('div');
+      close.className = 'tab-close';
+      close.textContent = '✕';
+      close.addEventListener('click', (e) => { e.stopPropagation(); ipc('close_tab', { id: t.id }); });
+
+      row.appendChild(ico);
+      row.appendChild(title);
+      row.appendChild(close);
+      list.appendChild(row);
+    });
+  };
+
+  ipc('ready');
+})();
+</script>
+</body>
+</html>

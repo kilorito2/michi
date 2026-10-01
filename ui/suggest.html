@@ -1,0 +1,230 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root{
+    --glass-bg: rgba(255,255,255,0.09);
+    --glass-bg-strong: rgba(255,255,255,0.17);
+    --glass-border: rgba(255,255,255,0.20);
+    --text: #f3f4fb;
+    --text-dim: rgba(243,244,251,0.55);
+    --link: #b9b0ff;
+    --accent: #8b7bff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100vw; height: 100vh;
+    background: transparent;
+    overflow: hidden;
+    font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    user-select: none;
+    color: var(--text);
+  }
+  /* Mismo vidrio que el menu "..." (ver menu.html): el fondo animado queda
+     debajo (/wallpaper.js, version difuminada) y este tinte encima. */
+  .box {
+    position: absolute; inset: 0;
+    /* Las alturas de filas y titulos estan fijas: Rust calcula con ellas el
+       alto del desplegable (ver src/suggest.rs: PAD, ROW_TWO, ROW_ONE, HEADER). */
+    padding: 6px;
+    background: linear-gradient(180deg, rgba(26,24,42,0.86), rgba(16,15,28,0.84));
+    border: 1px solid var(--glass-border);
+    overflow-y: auto;
+  }
+  .box::-webkit-scrollbar { width: 6px; }
+  .box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+
+  .head {
+    height: 26px; padding: 8px 12px 0;
+    font-size: 11.5px; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row {
+    display: flex; align-items: center; gap: 12px;
+    height: 48px; padding: 0 12px;
+    border-radius: 10px;
+    cursor: default;
+  }
+  .row.one { height: 36px; }
+  .row:hover { background: var(--glass-bg); }
+  .row.sel { background: var(--glass-bg-strong); }
+
+  .ico { position: relative; flex: none; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; }
+  .ico img { width: 18px; height: 18px; border-radius: 4px; object-fit: contain; }
+  .ico svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; opacity: .85; }
+  /* Distintivo abajo a la derecha del logo: historial, marcador o pestana. */
+  .badge {
+    position: absolute; right: -5px; bottom: -4px;
+    width: 13px; height: 13px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: #1d1b2e; color: var(--link);
+  }
+  .badge svg { width: 11px; height: 11px; stroke-width: 2.2; opacity: 1; }
+
+  .text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 1px; }
+  .title, .detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title { font-size: 13.5px; }
+  .detail { font-size: 12px; color: var(--link); }
+  .detail.dim { color: var(--text-dim); }
+  b { font-weight: 700; }
+  .chip {
+    flex: none; font-size: 11.5px; color: var(--text-dim);
+    padding: 3px 8px; border-radius: 999px; border: 1px solid var(--glass-border);
+  }
+</style>
+</head>
+<body>
+  <div class="box" id="box" role="listbox" aria-label="Sugerencias"></div>
+
+<script src="/wallpaper.js" data-variant="blur"></script>
+<script>
+(function () {
+  function ipc(cmd, extra) {
+    window.ipc.postMessage(JSON.stringify(Object.assign({ cmd }, extra || {})));
+  }
+
+  var ICONS = {
+    search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+    globe: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
+    go: '<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+    clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    star: '<svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.8 6.2.9-4.5 4.4 1 6.3L12 17.5 6.5 20.4l1-6.3L3 9.7l6.2-.9z"/></svg>',
+    tab: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18"/></svg>',
+  };
+  var BADGE = { history: 'clock', autofill: 'clock', bookmark: 'star', tab: 'tab' };
+
+  // Minusculas y sin acentos letra por letra, con el mismo largo que el
+  // texto original (para poder marcar en negrita lo que coincide).
+  var FOLD = { 'á':'a','à':'a','ä':'a','â':'a','ã':'a','é':'e','è':'e','ë':'e','ê':'e','í':'i','ì':'i','ï':'i','î':'i',
+    'ó':'o','ò':'o','ö':'o','ô':'o','õ':'o','ú':'u','ù':'u','ü':'u','û':'u','ñ':'n','ç':'c' };
+  function fold(s) {
+    var out = '';
+    for (var i = 0; i < s.length; i++) {
+      var l = s[i].toLowerCase();
+      out += (FOLD[l] || l)[0];
+    }
+    return out;
+  }
+
+  // El texto con las palabras escritas en negrita (solo nodos de texto: lo que
+  // llega de la red o del historial nunca se interpreta como HTML).
+  function marked(text, tokens) {
+    var el = document.createDocumentFragment();
+    var f = fold(text);
+    var on = new Array(text.length).fill(false);
+    tokens.forEach(function (t) {
+      if (!t) return;
+      var at = f.indexOf(t);
+      while (at !== -1) {
+        for (var i = at; i < at + t.length; i++) on[i] = true;
+        at = f.indexOf(t, at + t.length);
+      }
+    });
+    var i = 0;
+    while (i < text.length) {
+      var j = i;
+      while (j < text.length && on[j] === on[i]) j++;
+      var piece = text.slice(i, j);
+      if (on[i]) {
+        var b = document.createElement('b');
+        b.textContent = piece;
+        el.appendChild(b);
+      } else {
+        el.appendChild(document.createTextNode(piece));
+      }
+      i = j;
+    }
+    return el;
+  }
+
+  var box = document.getElementById('box');
+  var rows = [];
+
+  function select(index) {
+    rows.forEach(function (r, i) {
+      r.classList.toggle('sel', i === index);
+      r.setAttribute('aria-selected', i === index ? 'true' : 'false');
+    });
+    if (index != null && rows[index]) rows[index].scrollIntoView({ block: 'nearest' });
+  }
+
+  window.onSuggest = function (d) {
+    var tokens = fold(d.query || '').split(/\s+/).filter(Boolean);
+    box.textContent = '';
+    rows = [];
+    d.items.forEach(function (it, index) {
+      if (it.header) {
+        var h = document.createElement('div');
+        h.className = 'head';
+        h.textContent = it.header;
+        box.appendChild(h);
+      }
+      var row = document.createElement('div');
+      row.className = 'row' + (it.kind === 'suggestion' ? ' one' : '');
+      row.setAttribute('role', 'option');
+
+      var ico = document.createElement('div');
+      ico.className = 'ico';
+      if (it.icon) {
+        var img = document.createElement('img');
+        img.alt = '';
+        img.addEventListener('error', function () { img.remove(); ico.insertAdjacentHTML('afterbegin', ICONS.globe); });
+        img.src = it.icon;
+        ico.appendChild(img);
+      } else {
+        ico.innerHTML = it.kind === 'search' || it.kind === 'suggestion' ? ICONS.search
+          : it.kind === 'go' ? ICONS.go : ICONS.globe;
+      }
+      if (BADGE[it.kind]) {
+        var badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.innerHTML = ICONS[BADGE[it.kind]];
+        ico.appendChild(badge);
+      }
+      row.appendChild(ico);
+
+      var text = document.createElement('div');
+      text.className = 'text';
+      var title = document.createElement('div');
+      title.className = 'title';
+      // Lo escrito, tal cual; en el resto, lo que coincide en negrita.
+      if (it.kind === 'search' || it.kind === 'go') title.textContent = it.title;
+      else title.appendChild(marked(it.title, tokens));
+      text.appendChild(title);
+      if (it.kind !== 'suggestion') {
+        var detail = document.createElement('div');
+        detail.className = 'detail' + (it.kind === 'search' || it.kind === 'go' ? ' dim' : '');
+        if (it.kind === 'search' || it.kind === 'go') detail.textContent = it.detail;
+        else detail.appendChild(marked(it.detail, tokens));
+        text.appendChild(detail);
+      }
+      row.appendChild(text);
+
+      if (it.kind === 'tab') {
+        var chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = 'Cambiar a la pestana';
+        row.appendChild(chip);
+      }
+
+      // En mousedown y no en click: el clic le saca el foco a la barra, que
+      // pide cerrar el desplegable; con mousedown la eleccion ya salio.
+      row.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        if (e.button === 0) ipc('suggest_pick', { index: index });
+      });
+      box.appendChild(row);
+      rows.push(row);
+    });
+    box.scrollTop = 0;
+    select(d.selected);
+  };
+
+  window.onSuggestSelected = select;
+
+  ipc('ready');
+})();
+</script>
+</body>
+</html>

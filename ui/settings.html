@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Ajustes</title>
+<style>
+  :root{
+    --card: rgba(20,18,34,0.74);
+    --card-strong: rgba(30,28,48,0.86);
+    --line: rgba(255,255,255,0.12);
+    --line-strong: rgba(255,255,255,0.22);
+    --hover: rgba(255,255,255,0.08);
+    --text: #f3f4fb;
+    --text-dim: rgba(243,244,251,0.62);
+    --accent: #8b7bff;
+    --accent-soft: rgba(139,123,255,0.18);
+    --ok: #7cf29c;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  /* Fondo de respaldo en <html> y <body> transparente: ver el mismo
+     comentario en newtab.html (el <video> de fondo va con z-index:-1). */
+  html { background: #0b0a13; }
+  html, body {
+    margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden;
+    font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    color: var(--text);
+  }
+  body { background: transparent; }
+  /* Oscurece el fondo animado para que se lea todo. Las tarjetas usan un
+     color semiopaco en vez de backdrop-filter: difuminar un video a 60fps
+     detras de cada tarjeta es justo el costo de GPU que sacamos del resto
+     de la interfaz. */
+  #veil { position: fixed; inset: 0; z-index: 0; background: rgba(8,7,16,0.62); }
+
+  .layout { position: relative; z-index: 1; display: flex; height: 100%; }
+
+  nav {
+    flex: none; width: 232px; padding: 28px 14px;
+    display: flex; flex-direction: column; gap: 2px;
+    border-right: 1px solid var(--line);
+    background: rgba(14,13,24,0.55);
+  }
+  nav h1 { font-size: 20px; font-weight: 600; margin: 0 12px 18px; letter-spacing: -.01em; }
+  nav a {
+    display: flex; align-items: center; gap: 12px;
+    height: 38px; padding: 0 12px; border-radius: 10px;
+    color: var(--text-dim); text-decoration: none; font-size: 13.5px;
+    transition: background .15s ease, color .15s ease;
+  }
+  nav a svg { width: 17px; height: 17px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  nav a:hover { background: var(--hover); color: var(--text); }
+  nav a.active { background: var(--accent-soft); color: var(--text); }
+
+  main { flex: 1; overflow-y: auto; padding: 28px 40px 60px; }
+  main::-webkit-scrollbar { width: 8px; }
+  main::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.16); border-radius: 4px; }
+  .content { max-width: 760px; }
+
+  section { display: none; }
+  section.active { display: block; animation: enter .22s cubic-bezier(.2,.8,.2,1); }
+  @keyframes enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { section.active { animation: none; } }
+
+  h2 { font-size: 22px; font-weight: 600; margin: 4px 0 20px; letter-spacing: -.01em; }
+  h3 { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text-dim); margin: 26px 4px 10px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .row {
+    display: flex; align-items: center; gap: 16px;
+    min-height: 60px; padding: 12px 18px;
+  }
+  .row + .row { border-top: 1px solid var(--line); }
+  .row .text { flex: 1; min-width: 0; }
+  .row .title { font-size: 14px; }
+  .row .desc { font-size: 12px; color: var(--text-dim); margin-top: 3px; line-height: 1.45; }
+  .mono { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; word-break: break-all; }
+
+  select, .btn {
+    font: inherit; font-size: 13px; color: var(--text);
+    height: 34px; padding: 0 14px; border-radius: 9px;
+    border: 1px solid var(--line-strong); background: rgba(255,255,255,0.06);
+    cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .1s ease;
+  }
+  select { padding-right: 30px; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f3f4fb' stroke-width='2.2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center; }
+  select option { background: #1b1930; color: var(--text); }
+  .btn:hover, select:hover { background: rgba(255,255,255,0.12); }
+  .btn:active { transform: scale(.97); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #9a8cff; }
+  .btn.danger:hover { background: rgba(255,107,107,0.25); border-color: var(--danger); }
+  .btn[disabled] { opacity: .45; pointer-events: none; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Interruptor */
+  .switch { position: relative; flex: none; width: 40px; height: 22px; }
+  .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
+  .switch .track { position: absolute; inset: 0; border-radius: 11px; background: rgba(255,255,255,0.18); transition: background .18s ease; }
+  .switch .track::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+    background: #fff; transition: transform .18s cubic-bezier(.2,.8,.2,1);
+  }
+  .switch input:checked + .track { background: var(--accent); }
+  .switch input:checked + .track::after { transform: translateX(18px); }
+  .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Opciones tipo radio */
+  .choice { display: flex; align-items: center; gap: 14px; padding: 14px 18px; cursor: pointer; }
+  .choice + .choice { border-top: 1px solid var(--line); }
+  .choice:hover { background: var(--hover); }
+  .choice input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+
+  /* Fondos */
+  .themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+  .theme {
+    position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; cursor: pointer;
+    border: 2px solid transparent; background: var(--card);
+    transition: border-color .15s ease, transform .15s ease;
+  }
+  .theme:hover { transform: translateY(-2px); }
+  .theme.active { border-color: var(--accent); }
+  .theme img, .theme video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .theme span {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 10px 8px; font-size: 12.5px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+  }
+
+  /* Checkboxes de borrar datos */
+  .check { display: flex; align-items: flex-start; gap: 14px; padding: 13px 18px; cursor: pointer; }
+  .check + .check { border-top: 1px solid var(--line); }
+  .check input { accent-color: var(--accent); width: 16px; height: 16px; margin: 2px 0 0; }
+
+  /* Extensiones */
+  .ext-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .status { font-size: 12.5px; color: var(--text-dim); min-height: 18px; margin: 0 4px 12px; }
+  .status.busy::before {
+    content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; vertical-align: -1px;
+    border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ext { display: flex; gap: 14px; padding: 16px 18px; align-items: flex-start; }
+  .ext + .ext { border-top: 1px solid var(--line); }
+  .ext-icon { flex: none; width: 40px; height: 40px; border-radius: 10px; background: rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .ext-icon img { width: 32px; height: 32px; object-fit: contain; }
+  .ext-icon svg { width: 20px; height: 20px; stroke: var(--text-dim); fill: none; stroke-width: 1.8; }
+  .ext-main { flex: 1; min-width: 0; }
+  .ext-name { font-size: 14px; }
+  .ext-name .ver { font-size: 11.5px; color: var(--text-dim); margin-left: 6px; }
+  .ext-desc { font-size: 12px; color: var(--text-dim); margin-top: 3px; line-height: 1.45; }
+  .ext-btns { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .ext-btns .btn { height: 28px; padding: 0 10px; font-size: 12px; }
+  .ext.off .ext-icon, .ext.off .ext-name { opacity: .5; }
+  .empty { padding: 26px 18px; text-align: center; color: var(--text-dim); font-size: 13px; line-height: 1.6; }
+  .note { font-size: 12px; color: var(--text-dim); line-height: 1.55; margin: 14px 4px 0; }
+  .note.lead { margin: 0 4px 12px; }
+  .desc.warn { color: #ffd166; }
+  .desc[hidden] { display: none; }
+  /* Filas de permisos: muchas y cortas. */
+  .row.compact { min-height: 50px; padding: 8px 18px; }
+  .perm-state.allowed { color: var(--ok); }
+  .perm-state.denied { color: var(--danger); }
+
+  /* Importar */
+  .imp { padding: 16px 18px; }
+  .imp + .imp { border-top: 1px solid var(--line); }
+  .imp-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .imp-browser { font-size: 14px; font-weight: 500; }
+  .imp-profile { font-size: 12px; color: var(--text-dim); }
+  .imp-items { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 12px; }
+  .imp-items label { display: flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
+  .imp-items input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+  .imp-items label.off { color: var(--text-dim); opacity: .6; cursor: not-allowed; }
+
+  /* Acerca de */
+  .about-head { display: flex; align-items: center; gap: 16px; padding: 20px 18px; }
+  .logo { width: 52px; height: 52px; flex: none; object-fit: contain; }
+  .keys { display: grid; grid-template-columns: 1fr auto; }
+  .keys div { padding: 10px 18px; font-size: 13px; border-top: 1px solid var(--line); }
+  .keys div:nth-child(-n+2) { border-top: none; }
+  .keys kbd { font-family: inherit; font-size: 11.5px; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--line-strong); background: rgba(255,255,255,0.06); }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 28px; z-index: 5; transform: translate(-50%, 16px);
+    padding: 10px 18px; border-radius: 10px; font-size: 13px;
+    background: var(--card-strong); border: 1px solid var(--line-strong);
+    opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s cubic-bezier(.2,.8,.2,1);
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (max-width: 760px) {
+    nav { width: 64px; padding: 20px 8px; }
+    nav h1, nav a span { display: none; }
+    nav a { justify-content: center; padding: 0; }
+    main { padding: 20px 18px 40px; }
+  }
+</style>
+</head>
+<body>
+<div id="veil"></div>
+<div class="layout">
+  <nav>
+    <h1>Ajustes</h1>
+    <a href="#general" data-sec="general"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>General</span></a>
+    <a href="#appearance" data-sec="appearance"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m3 15 5-5 4 4 3-3 6 6"/></svg><span>Apariencia</span></a>
+    <a href="#privacy" data-sec="privacy"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6z"/></svg><span>Privacidad</span></a>
+    <a href="#downloads" data-sec="downloads"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg><span>Descargas</span></a>
+    <a href="#import" data-sec="import"><svg viewBox="0 0 24 24"><path d="M12 15V3m0 12-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span>Importar</span></a>
+    <a href="#extensions" data-sec="extensions"><svg viewBox="0 0 24 24"><path d="M19.44 7.85c-.05.32.06.65.29.88l1.57 1.57a2.4 2.4 0 0 1 0 3.4l-1.61 1.61a.98.98 0 0 1-.84.28c-.47-.07-.8-.48-.97-.93a2.5 2.5 0 1 0-3.21 3.21c.45.17.86.5.93.97a.98.98 0 0 1-.28.84l-1.61 1.61a2.4 2.4 0 0 1-3.4 0l-1.57-1.57a1.03 1.03 0 0 0-.88-.29c-.49.07-.84.5-1.02.97a2.5 2.5 0 1 1-3.24-3.24c.46-.18.9-.53.97-1.02a1.03 1.03 0 0 0-.29-.88L2.7 13.7a2.4 2.4 0 0 1 0-3.4l1.53-1.53c.24-.24.58-.35.92-.3.51.08.88.53 1.07 1.01a2.5 2.5 0 1 0 3.26-3.26c-.48-.2-.93-.56-1.01-1.07-.05-.34.06-.68.3-.92L10.3 2.7a2.4 2.4 0 0 1 3.4 0l1.57 1.57c.23.23.56.34.88.29.49-.07.84-.5 1.02-.97a2.5 2.5 0 1 1 3.24 3.24c-.46.18-.9.53-.97 1.02z"/></svg><span>Extensiones</span></a>
+    <a href="#about" data-sec="about"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span>Acerca de</span></a>
+  </nav>
+
+  <main><div class="content">
+
+    <!-- GENERAL -->
+    <section id="general">
+      <h2>General</h2>
+      <h3>Buscador</h3>
+      <div class="card">
+        <div class="row">
+          <div class="text">
+            <div class="title">Buscador predeterminado</div>
+            <div class="desc">Se usa en la barra de direcciones y en la pestana nueva.</div>
+          </div>
+          <select id="engine" aria-label="Buscador predeterminado"></select>
+        </div>
+        <div class="row">
+          <div class="text">
+            <div class="title">Sugerencias de busqueda</div>
+            <div class="desc">Mientras escribes en la barra, el buscador te sugiere busquedas. Para eso recibe lo que vas escribiendo (nunca las direcciones). Tu historial, marcadores y pestanas se sugieren igual, sin enviar nada.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="search-suggestions" aria-label="Sugerencias de busqueda" /><span class="track"></span></label>
+        </div>
+      </div>
+
+      <h3>Al iniciar</h3>
+      <div class="card">
+        <label class="choice"><input type="radio" name="startup" value="newtab" /> Abrir una pestana nueva</label>
+        <label class="choice"><input type="radio" name="startup" value="restore" /> Restaurar las pestanas de la ultima vez</label>
+      </div>
+    </section>
+
+    <!-- APARIENCIA -->
+    <section id="appearance">
+      <h2>Apariencia</h2>
+      <h3>Fondo</h3>
+      <div class="themes" id="themes"></div>
+
+      <h3>Paginas</h3>
+      <div class="card">
+        <div class="row">
+          <div class="text">
+            <div class="title">Zoom predeterminado</div>
+            <div class="desc">Con que tamano abre cada pestana nueva. Ctrl + rueda del mouse lo cambia en una pagina.</div>
+          </div>
+          <select id="zoom" aria-label="Zoom predeterminado">
+            <option value="0.67">67%</option><option value="0.75">75%</option><option value="0.8">80%</option>
+            <option value="0.9">90%</option><option value="1">100%</option><option value="1.1">110%</option>
+            <option value="1.25">125%</option><option value="1.5">150%</option><option value="1.75">175%</option>
+            <option value="2">200%</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRIVACIDAD -->
+    <section id="privacy">
+      <h2>Privacidad y seguridad</h2>
+      <h3>Seguridad</h3>
+      <div class="card">
+        <div class="row">
+          <div class="text">
+            <div class="title">Navegacion segura (Microsoft Defender SmartScreen)</div>
+            <div class="desc">Avisa antes de abrir sitios de phishing o con malware y revisa la reputacion de lo que descargas. Para eso envia a Microsoft las direcciones que visitas.</div>
+            <div class="desc warn" id="smartscreen-off" hidden>Windows tiene apagado SmartScreen para Microsoft Edge, y mientras siga asi esta proteccion no actua. Se enciende en Seguridad de Windows &gt; Control de aplicaciones y navegador &gt; Proteccion basada en la reputacion.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="smartscreen" aria-label="Navegacion segura" /><span class="track"></span></label>
+        </div>
+        <div class="row">
+          <div class="text">
+            <div class="title">Conexiones seguras (HTTPS)</div>
+            <div class="desc">Abre cada sitio primero con una conexion cifrada. Si el sitio no la ofrece, se abre igual sin cifrar (y la barra lo marca como no seguro) o se avisa antes, segun elijas.</div>
+          </div>
+          <select id="https-mode" aria-label="Conexiones seguras">
+            <option value="upgrade">Usar HTTPS cuando exista</option>
+            <option value="strict">Avisar antes de abrir sitios sin HTTPS</option>
+            <option value="off">Desactivado</option>
+          </select>
+        </div>
+      </div>
+
+      <h3>Privacidad</h3>
+      <div class="card">
+        <div class="row">
+          <div class="text">
+            <div class="title">Prevencion de seguimiento</div>
+            <div class="desc">Bloquea los rastreadores que siguen lo que haces de un sitio a otro. La estricta bloquea mas, pero algunos sitios pueden fallar.</div>
+          </div>
+          <select id="tracking" aria-label="Prevencion de seguimiento">
+            <option value="basic">Basica</option>
+            <option value="balanced">Equilibrada</option>
+            <option value="strict">Estricta</option>
+            <option value="off">Desactivada</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="text">
+            <div class="title">Borrar datos al cerrar</div>
+            <div class="desc">Al salir se borran el historial, las cookies, la cache y la lista de descargas, y las pestanas no se restauran. Vas a tener que volver a iniciar sesion en los sitios.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="clear-on-exit" aria-label="Borrar datos al cerrar" /><span class="track"></span></label>
+        </div>
+      </div>
+
+      <h3>Borrar datos de navegacion</h3>
+      <div class="card">
+        <label class="check"><input type="checkbox" id="clr-history" checked />
+          <div><div class="title">Historial de navegacion</div><div class="desc" id="history-count">Paginas visitadas y pestanas cerradas recientemente</div></div></label>
+        <label class="check"><input type="checkbox" id="clr-cookies" />
+          <div><div class="title">Cookies y otros datos de sitios</div><div class="desc">Cierra la sesion en la mayoria de los sitios</div></div></label>
+        <label class="check"><input type="checkbox" id="clr-cache" checked />
+          <div><div class="title">Imagenes y archivos en cache</div><div class="desc">Libera espacio; algunos sitios cargaran mas lento la proxima vez</div></div></label>
+        <label class="check"><input type="checkbox" id="clr-downloads" />
+          <div><div class="title">Lista de descargas</div><div class="desc">Solo la lista; los archivos descargados no se borran</div></div></label>
+        <div class="row"><div class="text"></div><button class="btn danger" id="clear">Borrar datos</button></div>
+      </div>
+
+      <h3>Ventanas emergentes</h3>
+      <div class="card">
+        <div class="row">
+          <div class="text">
+            <div class="title">Bloquear ventanas emergentes</div>
+            <div class="desc">Los sitios no pueden abrir pestanas nuevas por su cuenta; lo que abres con un clic se abre igual. Cuando se bloquea una, aparece un escudo en la barra de direcciones para abrirla si la querias.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="block-popups" aria-label="Bloquear ventanas emergentes" /><span class="track"></span></label>
+        </div>
+      </div>
+
+      <h3>Permisos</h3>
+      <p class="note lead">Cada sitio te pregunta la primera vez que quiere usar alguno de estos. Con "Bloquear", ningun sitio puede ni preguntar. Ademas, las notificaciones solo se pueden pedir despues de un clic, y los sitios sin conexion segura no pueden pedir ninguno.</p>
+      <div class="card" id="perm-kinds"></div>
+
+      <h3>Permisos guardados de cada sitio</h3>
+      <div class="card" id="site-perms"><div class="empty">Cargando...</div></div>
+    </section>
+
+    <!-- DESCARGAS -->
+    <section id="downloads">
+      <h2>Descargas</h2>
+      <div class="card">
+        <div class="row">
+          <div class="text">
+            <div class="title">Ubicacion</div>
+            <div class="desc mono" id="dl-dir"></div>
+          </div>
+          <div class="btns">
+            <button class="btn" id="dl-reset">Restablecer</button>
+            <button class="btn" id="dl-pick">Cambiar</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- IMPORTAR -->
+    <section id="import">
+      <h2>Importar de otro navegador</h2>
+      <p class="note lead">Trae tus marcadores, el historial, las sesiones iniciadas (cookies) y las pestanas abiertas desde otro navegador instalado en esta PC. Se agregan a lo que ya tienes en Michi, sin reemplazar nada.</p>
+      <div class="card" id="import-list"><div class="empty">Buscando navegadores...</div></div>
+      <p class="note">Para que las sesiones se copien bien, cierra antes el otro navegador. En los navegadores basados en Chromium (Chrome, Edge, Brave, Opera, Vivaldi) las cookies van cifradas por Windows y no se pueden importar: se traen los marcadores y el historial, pero vas a tener que iniciar sesion de nuevo en esos sitios.</p>
+    </section>
+
+    <!-- EXTENSIONES -->
+    <section id="extensions">
+      <h2>Extensiones</h2>
+      <div class="ext-actions">
+        <button class="btn primary" id="store-chrome">Chrome Web Store</button>
+        <button class="btn" id="store-edge">Complementos de Edge</button>
+        <button class="btn" id="ext-file">Instalar desde archivo</button>
+        <button class="btn" id="ext-folder">Cargar carpeta descomprimida</button>
+      </div>
+      <div class="status" id="ext-status" role="status" aria-live="polite"></div>
+      <div class="card" id="ext-list"><div class="empty">Cargando...</div></div>
+      <p class="note">
+        Para instalar desde la tienda: abre la pagina de la extension en Chrome Web Store o Complementos de Edge y
+        toca <b>Agregar a Michi</b> en la barra de direcciones. Las extensiones activas que tienen ventana
+        propia aparecen como un icono en la barra superior, junto al boton <b>+</b>.
+      </p>
+      <p class="note">
+        Antes de instalar se verifica la firma digital del paquete y se muestra lo que la extension va a poder hacer.
+        Las que vienen en un .zip o una carpeta no tienen firma: instala solo las de fuentes en las que confies.
+      </p>
+    </section>
+
+    <!-- ACERCA DE -->
+    <section id="about">
+      <h2>Acerca de</h2>
+      <div class="card">
+        <div class="about-head">
+          <img class="logo" src="/icon.png" alt="" />
+          <div>
+            <div class="title" style="font-size:16px">Michi <span id="app-version"></span></div>
+            <div class="desc" id="engine-version"></div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="text">
+            <div class="title">Carpeta de datos</div>
+            <div class="desc mono" id="data-dir"></div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="text">
+            <div class="title">Restablecer ajustes</div>
+            <div class="desc">Vuelve buscador, fondo, zoom, descargas, inicio y las opciones de privacidad y seguridad a sus valores de fabrica. No borra marcadores, historial, extensiones ni los permisos de los sitios.</div>
+          </div>
+          <button class="btn danger" id="reset">Restablecer</button>
+        </div>
+      </div>
+
+      <h3>Atajos de teclado</h3>
+      <div class="card keys">
+        <div>Nueva pestana</div><div><kbd>Ctrl</kbd> <kbd>T</kbd></div>
+        <div>Cerrar pestana</div><div><kbd>Ctrl</kbd> <kbd>W</kbd></div>
+        <div>Reabrir pestana cerrada</div><div><kbd>Ctrl</kbd> <kbd>Mayus</kbd> <kbd>T</kbd></div>
+        <div>Pestana siguiente / anterior</div><div><kbd>Ctrl</kbd> <kbd>Tab</kbd> &nbsp;/&nbsp; <kbd>Ctrl</kbd> <kbd>Mayus</kbd> <kbd>Tab</kbd></div>
+        <div>Ir a la barra de direcciones</div><div><kbd>Ctrl</kbd> <kbd>L</kbd></div>
+        <div>Agregar/quitar marcador</div><div><kbd>Ctrl</kbd> <kbd>D</kbd></div>
+        <div>Historial, descargas y marcadores</div><div><kbd>Ctrl</kbd> <kbd>H</kbd></div>
+        <div>Menu</div><div><kbd>Alt</kbd> <kbd>F</kbd></div>
+        <div>Buscar en la pagina</div><div><kbd>Ctrl</kbd> <kbd>F</kbd></div>
+        <div>Recargar</div><div><kbd>F5</kbd></div>
+        <div>Zoom</div><div><kbd>Ctrl</kbd> <kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></div>
+        <div>Imprimir</div><div><kbd>Ctrl</kbd> <kbd>P</kbd></div>
+        <div>Herramientas de desarrollador</div><div><kbd>F12</kbd></div>
+      </div>
+    </section>
+
+  </div></main>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="/wallpaper.js"></script>
+<script>
+(function () {
+  function ipc(cmd, extra) {
+    window.ipc.postMessage(JSON.stringify(Object.assign({ cmd }, extra || {})));
+  }
+  function set(key, value) { ipc('set_setting', { key: key, value: value }); }
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+  // --- Secciones (por #hash, asi el menu puede abrir directo en una) ---
+  var SECTIONS = ['general', 'appearance', 'privacy', 'downloads', 'import', 'extensions', 'about'];
+  function route() {
+    var sec = location.hash.slice(1);
+    if (SECTIONS.indexOf(sec) === -1) sec = 'general';
+    document.querySelectorAll('section').forEach(function (s) { s.classList.toggle('active', s.id === sec); });
+    document.querySelectorAll('nav a').forEach(function (a) { a.classList.toggle('active', a.getAttribute('data-sec') === sec); });
+    document.title = 'Ajustes - ' + document.querySelector('nav a[data-sec="' + sec + '"] span').textContent;
+    document.querySelector('main').scrollTop = 0;
+  }
+  window.addEventListener('hashchange', route);
+  route();
+
+  // La primera vez que se abre "Importar", busca los navegadores instalados.
+  var importScanned = false;
+  function maybeScanImport() {
+    if (location.hash.slice(1) === 'import' && !importScanned) {
+      importScanned = true;
+      ipc('import_scan');
+    }
+  }
+  window.addEventListener('hashchange', maybeScanImport);
+  maybeScanImport();
+
+  // --- Controles -> Rust ---
+  $('engine').addEventListener('change', function () { set('searchEngine', this.value); });
+  $('search-suggestions').addEventListener('change', function () { set('searchSuggestions', this.checked); });
+  document.querySelectorAll('input[name=startup]').forEach(function (r) {
+    r.addEventListener('change', function () { if (r.checked) set('startup', r.value); });
+  });
+  $('zoom').addEventListener('change', function () { set('defaultZoom', parseFloat(this.value)); });
+  $('block-popups').addEventListener('change', function () { set('blockPopups', this.checked); });
+  $('smartscreen').addEventListener('change', function () { set('smartscreen', this.checked); });
+  $('https-mode').addEventListener('change', function () { set('httpsMode', this.value); });
+  $('tracking').addEventListener('change', function () { set('trackingPrevention', this.value); });
+  $('clear-on-exit').addEventListener('change', function () { set('clearOnExit', this.checked); });
+  $('dl-pick').addEventListener('click', function () { ipc('pick_downloads_dir'); });
+  $('dl-reset').addEventListener('click', function () { set('downloadsDir', null); });
+  $('clear').addEventListener('click', function () {
+    ipc('clear_data', {
+      history: $('clr-history').checked, cookies: $('clr-cookies').checked,
+      cache: $('clr-cache').checked, downloads: $('clr-downloads').checked,
+    });
+  });
+  $('reset').addEventListener('click', function () { ipc('reset_settings'); });
+
+  $('store-chrome').addEventListener('click', function () { ipc('open_url', { url: 'https://chromewebstore.google.com/' }); });
+  $('store-edge').addEventListener('click', function () { ipc('open_url', { url: 'https://microsoftedge.microsoft.com/addons/' }); });
+  $('ext-file').addEventListener('click', function () { ipc('ext_install_file'); });
+  $('ext-folder').addEventListener('click', function () { ipc('ext_install_folder'); });
+
+  // --- Rust -> pagina ---
+  var themesBuilt = false;
+  window.onSettings = function (d) {
+    var s = d.settings;
+    var engine = $('engine');
+    if (!engine.options.length) {
+      d.engines.forEach(function (e) { engine.add(new Option(e.label, e.id)); });
+    }
+    engine.value = s.searchEngine;
+    $('search-suggestions').checked = s.searchSuggestions;
+    document.querySelectorAll('input[name=startup]').forEach(function (r) { r.checked = r.value === s.startup; });
+    var z = String(s.defaultZoom);
+    if (!Array.prototype.some.call($('zoom').options, function (o) { return o.value === z; })) {
+      $('zoom').add(new Option(Math.round(s.defaultZoom * 100) + '%', z));
+    }
+    $('zoom').value = z;
+    $('block-popups').checked = s.blockPopups;
+    $('smartscreen').checked = s.smartscreen;
+    $('smartscreen-off').hidden = !d.smartscreenOffInWindows;
+    $('https-mode').value = s.httpsMode;
+    $('tracking').value = s.trackingPrevention;
+    $('clear-on-exit').checked = s.clearOnExit;
+    showPermissionKinds(d.permissionKinds, s.blockedPermissions);
+    $('dl-dir').textContent = d.downloadsDir;
+    $('dl-reset').disabled = !s.downloadsDir;
+    $('history-count').textContent = d.historyCount
+      ? d.historyCount + ' paginas visitadas y pestanas cerradas recientemente'
+      : 'Paginas visitadas y pestanas cerradas recientemente';
+    $('app-version').textContent = d.appVersion;
+    $('engine-version').textContent = 'Motor: Microsoft Edge WebView2 ' + d.engineVersion;
+    $('data-dir').textContent = d.dataDir;
+
+    if (!themesBuilt) {
+      themesBuilt = true;
+      var el = $('themes');
+      d.themes.forEach(function (t) {
+        var card = document.createElement('button');
+        card.className = 'theme';
+        card.setAttribute('data-id', t.id);
+        card.setAttribute('aria-label', 'Fondo ' + t.label);
+        // Vista previa estatica: el primer cuadro de la version chica (o la
+        // imagen), sin reproducir 4 videos mas a la vez.
+        var still = window.__isStillWallpaper(t.id);
+        var media = document.createElement(still ? 'img' : 'video');
+        media.src = '/wallpapers/' + t.id + '.blur' + (still ? '.jpg' : '.mp4');
+        if (!still) { media.muted = true; media.preload = 'metadata'; }
+        card.appendChild(media);
+        var label = document.createElement('span');
+        label.textContent = t.label;
+        card.appendChild(label);
+        card.addEventListener('click', function () { set('theme', t.id); });
+        el.appendChild(card);
+      });
+    }
+    document.querySelectorAll('.theme').forEach(function (c) {
+      c.classList.toggle('active', c.getAttribute('data-id') === s.theme);
+    });
+  };
+
+  // --- Permisos: preguntar / bloquear cada tipo para todos los sitios ---
+  var permsBuilt = false;
+  function showPermissionKinds(kinds, blocked) {
+    var el = $('perm-kinds');
+    if (!permsBuilt) {
+      permsBuilt = true;
+      kinds.forEach(function (k) {
+        var row = document.createElement('div');
+        row.className = 'row compact';
+        var text = document.createElement('div');
+        text.className = 'text';
+        var title = document.createElement('div');
+        title.className = 'title';
+        title.textContent = k.label;
+        text.appendChild(title);
+        var sel = document.createElement('select');
+        sel.setAttribute('aria-label', k.label);
+        sel.setAttribute('data-kind', k.id);
+        sel.add(new Option('Preguntar', 'ask'));
+        sel.add(new Option('Bloquear', 'block'));
+        sel.addEventListener('change', function () {
+          ipc('set_permission_default', { kind: k.id, blocked: sel.value === 'block' });
+        });
+        row.appendChild(text);
+        row.appendChild(sel);
+        el.appendChild(row);
+      });
+    }
+    el.querySelectorAll('select[data-kind]').forEach(function (sel) {
+      sel.value = blocked.indexOf(sel.getAttribute('data-kind')) !== -1 ? 'block' : 'ask';
+    });
+  }
+
+  // --- Permisos que cada sitio tiene guardados (ver permissions.rs) ---
+  window.onSitePermissions = function (list) {
+    var el = $('site-perms');
+    if (!list.length) {
+      el.innerHTML = '<div class="empty">Ningun sitio tiene permisos guardados.</div>';
+      return;
+    }
+    el.innerHTML = '';
+    list.slice().sort(function (a, b) { return a.origin.localeCompare(b.origin) || a.label.localeCompare(b.label); })
+      .forEach(function (p) {
+        var row = document.createElement('div');
+        row.className = 'row compact';
+        var text = document.createElement('div');
+        text.className = 'text';
+        var title = document.createElement('div');
+        title.className = 'title mono';
+        title.textContent = p.origin;
+        var desc = document.createElement('div');
+        desc.className = 'desc';
+        desc.append(p.label + ': ');
+        var stateEl = document.createElement('span');
+        stateEl.className = 'perm-state ' + (p.allowed ? 'allowed' : 'denied');
+        stateEl.textContent = p.allowed ? 'Permitido' : 'Bloqueado';
+        desc.appendChild(stateEl);
+        text.appendChild(title);
+        text.appendChild(desc);
+        var reset = document.createElement('button');
+        reset.className = 'btn';
+        reset.textContent = 'Restablecer';
+        reset.title = 'El sitio vuelve a tener que preguntar';
+        reset.addEventListener('click', function () {
+          ipc('reset_site_permission', { origin: p.origin, kind: p.kind });
+        });
+        row.appendChild(text);
+        row.appendChild(reset);
+        el.appendChild(row);
+      });
+  };
+
+  var PUZZLE = '<svg viewBox="0 0 24 24"><path d="M19.44 7.85c-.05.32.06.65.29.88l1.57 1.57a2.4 2.4 0 0 1 0 3.4l-1.61 1.61a.98.98 0 0 1-.84.28c-.47-.07-.8-.48-.97-.93a2.5 2.5 0 1 0-3.21 3.21c.45.17.86.5.93.97a.98.98 0 0 1-.28.84l-1.61 1.61a2.4 2.4 0 0 1-3.4 0l-1.57-1.57a1.03 1.03 0 0 0-.88-.29c-.49.07-.84.5-1.02.97a2.5 2.5 0 1 1-3.24-3.24c.46-.18.9-.53.97-1.02a1.03 1.03 0 0 0-.29-.88L2.7 13.7a2.4 2.4 0 0 1 0-3.4l1.53-1.53c.24-.24.58-.35.92-.3.51.08.88.53 1.07 1.01a2.5 2.5 0 1 0 3.26-3.26c-.48-.2-.93-.56-1.01-1.07-.05-.34.06-.68.3-.92L10.3 2.7a2.4 2.4 0 0 1 3.4 0l1.57 1.57c.23.23.56.34.88.29.49-.07.84-.5 1.02-.97a2.5 2.5 0 1 1 3.24 3.24c-.46.18-.9.53-.97 1.02z"/></svg>';
+
+  window.onExtensions = function (list, supported) {
+    var el = $('ext-list');
+    if (!supported) {
+      el.innerHTML = '<div class="empty">Esta version de Microsoft Edge WebView2 no soporta extensiones.<br>Actualizala desde Windows Update o microsoft.com/edge/webview2.</div>';
+      return;
+    }
+    if (!list.length) {
+      el.innerHTML = '<div class="empty">Todavia no instalaste extensiones.<br>Busca una en Chrome Web Store (por ejemplo uBlock Origin o Dark Reader) y toca <b>Agregar a Michi</b>.</div>';
+      return;
+    }
+    el.innerHTML = '';
+    list.forEach(function (x) {
+      var row = document.createElement('div');
+      row.className = 'ext' + (x.enabled ? '' : ' off');
+      row.innerHTML =
+        '<div class="ext-icon">' + (x.icon ? '<img alt="" src="' + esc(x.icon) + '">' : PUZZLE) + '</div>' +
+        '<div class="ext-main">' +
+          '<div class="ext-name">' + esc(x.name) + (x.version ? '<span class="ver">' + esc(x.version) + '</span>' : '') + '</div>' +
+          (x.description ? '<div class="ext-desc">' + esc(x.description) + '</div>' : '') +
+          '<div class="ext-btns">' +
+            (x.options ? '<button class="btn" data-do="options">Opciones</button>' : '') +
+            '<button class="btn danger" data-do="remove">Quitar</button>' +
+          '</div>' +
+        '</div>' +
+        '<label class="switch" title="Activar o desactivar"><input type="checkbox" aria-label="Activar ' + esc(x.name) + '"' + (x.enabled ? ' checked' : '') + '><span class="track"></span></label>';
+      row.querySelector('input').addEventListener('change', function () {
+        ipc('ext_enable', { id: x.id, enabled: this.checked });
+      });
+      row.querySelectorAll('[data-do]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var what = b.getAttribute('data-do');
+          if (what === 'remove') ipc('ext_remove', { id: x.id });
+          else ipc('ext_open', { id: x.id, page: what });
+        });
+      });
+      el.appendChild(row);
+    });
+  };
+
+  window.onExtensionStatus = function (msg) {
+    var el = $('ext-status');
+    el.textContent = msg || '';
+    el.classList.toggle('busy', /\.\.\.$/.test(msg || ''));
+  };
+
+  // --- Importar de otro navegador (ver import.rs) ---
+  var IMPORT_ITEMS = [
+    { key: 'bookmarks', label: 'Marcadores' },
+    { key: 'history', label: 'Historial' },
+    { key: 'cookies', label: 'Sesiones (cookies)' },
+    { key: 'tabs', label: 'Pestanas abiertas' },
+  ];
+  window.onImportSources = function (list) {
+    var el = $('import-list');
+    if (!list.length) {
+      el.innerHTML = '<div class="empty">No se encontraron otros navegadores con datos para importar en esta PC.</div>';
+      return;
+    }
+    el.innerHTML = '';
+    list.forEach(function (src) {
+      var card = document.createElement('div');
+      card.className = 'imp';
+
+      var head = document.createElement('div');
+      head.className = 'imp-head';
+      head.innerHTML = '<span class="imp-browser">' + esc(src.browser) + '</span>' +
+        '<span class="imp-profile">' + esc(src.profile) + '</span>';
+      card.appendChild(head);
+
+      var items = document.createElement('div');
+      items.className = 'imp-items';
+      IMPORT_ITEMS.forEach(function (it) {
+        var available = src[it.key];
+        var label = document.createElement('label');
+        if (!available) label.className = 'off';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.setAttribute('data-item', it.key);
+        cb.checked = available;
+        cb.disabled = !available;
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(it.label));
+        items.appendChild(label);
+      });
+      card.appendChild(items);
+
+      var btn = document.createElement('button');
+      btn.className = 'btn primary';
+      btn.textContent = 'Importar';
+      btn.addEventListener('click', function () {
+        var sel = { cmd: 'import_run', key: src.key };
+        IMPORT_ITEMS.forEach(function (it) {
+          var cb = items.querySelector('input[data-item="' + it.key + '"]');
+          sel[it.key] = !!(cb && cb.checked && !cb.disabled);
+        });
+        if (!sel.bookmarks && !sel.history && !sel.cookies && !sel.tabs) {
+          window.onToast('Elige al menos una cosa para importar');
+          return;
+        }
+        window.ipc.postMessage(JSON.stringify(sel));
+        btn.disabled = true;
+        btn.textContent = 'Importando...';
+        setTimeout(function () { btn.disabled = false; btn.textContent = 'Importar'; }, 4000);
+      });
+      card.appendChild(btn);
+      el.appendChild(card);
+    });
+  };
+
+  var toastTimer = null;
+  window.onToast = function (msg) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+  };
+
+  ipc('ready');
+})();
+</script>
+</body>
+</html>

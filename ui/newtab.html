@@ -1,0 +1,166 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Nueva pestana</title>
+<style>
+  :root{
+    --glass-bg: rgba(255,255,255,0.10);
+    --glass-bg-strong: rgba(255,255,255,0.18);
+    --glass-border: rgba(255,255,255,0.24);
+    --text: #f3f4fb;
+    --text-dim: rgba(243,244,251,0.7);
+    --accent: #8b7bff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100vw; height: 100vh;
+    overflow: hidden;
+    font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    user-select: none;
+  }
+  /* El color de respaldo va en <html> y el <body> queda transparente a
+     proposito: el <video> de fondo tiene z-index:-1, y en ese orden de
+     pintado el fondo del <body> se dibuja ENCIMA de el — con el color
+     puesto en el body, el video cargaba y se reproducia pero quedaba tapado.
+     El fondo de <html> es el del lienzo, que siempre va debajo de todo. */
+  html { background: #0b0a13; }
+  body { background: transparent; }
+
+  /* Oscurece un poco el video para que la barra de busqueda y el selector
+     de temas se lean bien encima, sin importar que tan clara sea la escena.
+     El <video> de fondo en si lo inserta /wallpaper.js (ui/wallpaper.js,
+     compartido con la barra y los paneles). */
+  #veil {
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, rgba(6,5,12,0.25) 0%, rgba(6,5,12,0.55) 100%);
+    z-index: 1;
+  }
+
+  .center {
+    position: relative;
+    z-index: 2;
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .search-wrap {
+    display: flex; align-items: center; gap: 12px;
+    width: min(640px, 86vw);
+    height: 52px;
+    padding: 0 20px;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+    transition: background .15s ease, border-color .15s ease;
+  }
+  .search-wrap:focus-within { background: var(--glass-bg-strong); border-color: var(--accent); }
+  .search-wrap svg { flex: none; opacity: .75; }
+  #q {
+    flex: 1; min-width: 0;
+    background: transparent; border: none; outline: none;
+    color: var(--text); font-size: 17px;
+    user-select: text;
+  }
+  #q::placeholder { color: var(--text-dim); }
+
+  /* Selector de temas: fila de pastillas glass abajo, con la activa resaltada. */
+  #themes {
+    position: fixed;
+    left: 50%; bottom: 30px; transform: translateX(-50%);
+    z-index: 2;
+    display: flex; gap: 8px;
+    padding: 6px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .theme-pill {
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .theme-pill:hover { background: var(--glass-bg); color: var(--text); }
+  .theme-pill.active { background: var(--glass-bg-strong); color: var(--text); border-color: var(--accent); }
+</style>
+</head>
+<body>
+  <div id="veil"></div>
+
+  <div class="center">
+    <div class="search-wrap">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+      <input id="q" spellcheck="false" autofocus placeholder="Buscar o escribir una direccion" />
+    </div>
+  </div>
+
+  <div id="themes"></div>
+
+<script src="/wallpaper.js"></script>
+<script>
+(function () {
+  function ipc(cmd, extra) {
+    window.ipc.postMessage(JSON.stringify(Object.assign({ cmd }, extra || {})));
+  }
+
+  // Los fondos disponibles y el buscador llegan de Rust (window.onSettings,
+  // ver sync::push_own_pages). El tema ACTIVO lo decide Rust (para que la
+  // barra, los paneles y esta pagina siempre muestren el mismo), asi que
+  // solo avisamos por IPC cual se eligio en vez de aplicarlo nosotros mismos.
+  var themesEl = document.getElementById('themes');
+  var input = document.getElementById('q');
+  var activeTheme = null;
+
+  function markActive() {
+    themesEl.querySelectorAll('.theme-pill').forEach(function (el) {
+      el.classList.toggle('active', el.getAttribute('data-id') === activeTheme);
+    });
+  }
+
+  window.onSettings = function (d) {
+    if (!themesEl.children.length) {
+      d.themes.forEach(function (t) {
+        var pill = document.createElement('div');
+        pill.className = 'theme-pill';
+        pill.setAttribute('data-id', t.id);
+        pill.textContent = t.label;
+        pill.addEventListener('click', function () { ipc('set_theme', { id: t.id }); });
+        themesEl.appendChild(pill);
+      });
+    }
+    var engine = d.engines.filter(function (e) { return e.id === d.settings.searchEngine; })[0];
+    input.placeholder = 'Buscar con ' + (engine ? engine.label : 'Google') + ' o escribir una direccion';
+    markActive();
+  };
+
+  // El <video> de fondo lo maneja /wallpaper.js; aca solo resaltamos la
+  // pastilla del tema activo.
+  window.onWallpaperTheme = function (theme) {
+    activeTheme = theme;
+    markActive();
+  };
+
+  input.addEventListener('keydown', function (e) {
+    // Rust arma la URL con el buscador elegido (o abre la direccion, si
+    // lo escrito parece una; ver storage::resolve_input).
+    if (e.key === 'Enter' && input.value.trim()) ipc('search', { q: input.value });
+  });
+
+  ipc('ready');
+})();
+</script>
+</body>
+</html>

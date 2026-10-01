@@ -1,0 +1,67 @@
+# El navegador y su instalador (installer/, ver tools/build_installer.ps1).
+[workspace]
+members = [".", "installer"]
+
+[package]
+name = "michi"
+version = "0.1.0"
+edition = "2021"
+description = "Michi: navegador de escritorio con interfaz glassmorphism, pestanas laterales y panel de descargas"
+license = "MIT"
+repository = "https://github.com/kilorito2/michi"
+
+[dependencies]
+wry = { version = "0.57", features = ["devtools"] }
+winit = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+# Descargar extensiones de Chrome Web Store / Edge Add-ons (.crx) y
+# desempaquetarlas (ver src/extensions.rs).
+ureq = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Dialogos nativos de "elegir carpeta/archivo" (ajustes de descargas,
+# instalar extension desde archivo o carpeta).
+rfd = "0.15"
+# Verificar la firma de los .crx (ver src/crx.rs) y numeros aleatorios para
+# los nonce de CSP (ver src/protocol.rs). Ya venia compilado por ureq/rustls.
+ring = "0.17"
+# Importar datos de otros navegadores (ver src/import.rs): sus marcadores,
+# historial y cookies estan en bases SQLite (en Firefox las cookies estan en
+# texto plano); las pestanas abiertas de Firefox, en un JSON comprimido con LZ4.
+rusqlite = { version = "0.40", features = ["bundled"] }
+lz4_flex = { version = "0.14", default-features = false, features = ["safe-decode", "std"] }
+# Codificar el favicon de cada pestana como data URL para el panel (ver
+# native::stream_to_data_url y src/tabs.rs).
+base64 = "0.22"
+
+# GetCursorPos / GetAsyncKeyState: el vigilante del cursor que cierra los
+# paneles laterales (ver src/panels.rs). Misma version que ya trae winit.
+# LibraryLoader/Threading/SystemServices: endurecer el proceso al arrancar
+# (ver security::harden_process). Registry: saber si Windows apago SmartScreen.
+# Pipes/FileSystem/Security: un solo Michi abierto (ver src/single_instance.rs).
+# ToolHelp: los procesos de WebView2 de Michi, para su sonido (src/audio.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_SystemServices", "Win32_System_Registry", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO", "Win32_System_Diagnostics_ToolHelp"] }
+# API de WebView2 que wry no expone: extensiones (ICoreWebView2Profile7),
+# atajos de teclado (AcceleratorKeyPressed), borrar datos por tipo. Mismas
+# versiones que ya usa wry por dentro.
+webview2-com = "0.39"
+windows-core = "0.62"
+# IStream: leer los bytes del favicon que entrega WebView2 (ver
+# native::stream_to_data_url). Media_Audio: nombre e icono de Michi en el
+# mezclador de volumen (ver src/audio.rs). Misma version que usa webview2-com.
+windows = { version = "0.62", features = ["Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Media_Audio"] }
+
+# Incrustar el icono en el .exe (ver build.rs).
+[build-dependencies]
+embed-resource = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+# Un desborde de enteros en release es un panico (queda en crash.log) y no
+# un valor que da la vuelta en silencio y termina, por ejemplo, en un indice
+# o un tamano equivocado.
+overflow-checks = true
