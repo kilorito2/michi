@@ -25,6 +25,11 @@
   var box = null;      // {w, h, x, y}: ultimo recorte recibido de Rust
   var current = null;  // capa (<video>/<img>) visible
   var incoming = null; // capa del tema nuevo, cargando por debajo de la actual
+  // Congelado: la pestana al frente esta reproduciendo un video o sonido (lo
+  // avisa Rust, ver sync::push_media). Los videos de fondo quedan en pausa
+  // sobre su ultimo cuadro: cada uno es un decodificador y una composicion
+  // mas para la GPU, justo cuando el video de la pagina la necesita.
+  var frozen = false;
 
   var style = document.createElement('style');
   style.textContent =
@@ -89,9 +94,14 @@
     v.style.opacity = '.9999';
     v.addEventListener('loadedmetadata', function () {
       v.currentTime = clockTime(v.duration);
+      // Aunque este congelado hace falta un cuadro en pantalla: arranca, y
+      // apenas suena el primer cuadro se pausa (ver 'playing').
       if (!document.hidden) v.play().catch(function () {});
     }, { once: true });
-    v.addEventListener('playing', function () { reveal(v); }, { once: true });
+    v.addEventListener('playing', function () {
+      reveal(v);
+      if (frozen) v.pause();
+    }, { once: true });
     v.src = src;
     return v;
   }
@@ -139,7 +149,25 @@
     return el;
   }
 
-  window.__applyWallpaper = function (theme, winW, winH, offX, offY) {
+  function setFrozen(value) {
+    value = !!value;
+    if (value === frozen) return;
+    frozen = value;
+    [current, incoming].forEach(function (v) {
+      if (!v || !isVideo(v)) return;
+      if (frozen) {
+        v.pause();
+      } else if (!document.hidden && v.duration > 0) {
+        // Se retoma donde va el reloj comun, como las demas superficies.
+        v.currentTime = clockTime(v.duration);
+        v.play().catch(function () {});
+      }
+    });
+  }
+  window.__setWallpaperFrozen = setFrozen;
+
+  window.__applyWallpaper = function (theme, winW, winH, offX, offY, freeze) {
+    if (freeze !== undefined) setFrozen(freeze);
     box = { w: winW, h: winH, x: offX, y: offY };
     if (current) place(current);
     if (incoming) place(incoming);
@@ -178,7 +206,7 @@
       if (!v || !isVideo(v)) return;
       if (document.hidden) {
         v.pause();
-      } else if (v.duration > 0) {
+      } else if (v.duration > 0 && !frozen) {
         v.currentTime = clockTime(v.duration);
         v.play().catch(function () {});
       }

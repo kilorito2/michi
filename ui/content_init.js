@@ -1,8 +1,60 @@
 // Se inyecta en TODAS las paginas de contenido (todas las pestanas), en
-// todas las navegaciones, antes de que la pagina cargue. Por defecto no
-// hace nada: solo actua cuando la pagina es la portada de Google, para
-// dejarla en un tono oscuro que combina con el resto de la interfaz
-// glassmorphism y mostrar unicamente la barra de busqueda (sin logo, sin
+// todas las navegaciones, antes de que la pagina cargue. Hace dos cosas:
+//
+// 1. Avisa a Rust cuando la pagina tiene un video reproduciendose (ver
+//    ipc::media_message): mientras tanto la interfaz congela su fondo
+//    animado, que le quita GPU al video. Solo manda "michi:media:1" o
+//    "michi:media:0", nunca nada de la pagina.
+// 2. En la portada de Google, ver mas abajo.
+(function () {
+  if (!window.ipc || typeof window.ipc.postMessage !== 'function') return;
+  var MIN_AREA = 160 * 90; // un videito de avatar no cuenta
+  var STOP_DELAY = 1500;   // TikTok/YouTube pausan uno y arrancan otro: no parpadear
+  var playing = new Set();
+  var sent = false;
+  var timer = 0;
+
+  function report(value) {
+    if (value === sent) return;
+    sent = value;
+    try { window.ipc.postMessage('michi:media:' + (value ? '1' : '0')); } catch (e) {}
+  }
+
+  function update() {
+    playing.forEach(function (v) {
+      if (!v.isConnected || v.paused || v.ended) playing.delete(v);
+    });
+    if (playing.size) {
+      clearTimeout(timer);
+      timer = 0;
+      report(true);
+    } else if (sent && !timer) {
+      timer = setTimeout(function () {
+        timer = 0;
+        update();
+        if (!playing.size) report(false);
+      }, STOP_DELAY);
+    }
+  }
+
+  // Los eventos de media no burbujean, pero la fase de captura en window si
+  // los ve (todos los <video> de la pagina, aunque los cree el sitio despues).
+  window.addEventListener('playing', function (e) {
+    var v = e.target;
+    if (!v || v.tagName !== 'VIDEO' || v.offsetWidth * v.offsetHeight < MIN_AREA) return;
+    playing.add(v);
+    update();
+  }, true);
+  ['pause', 'ended', 'emptied', 'abort'].forEach(function (name) {
+    window.addEventListener(name, function (e) {
+      if (!playing.delete(e.target)) return;
+      update();
+    }, true);
+  });
+})();
+
+// Portada de Google: la deja en un tono oscuro que combina con el resto de la
+// interfaz glassmorphism y mostrar unicamente la barra de busqueda (sin logo, sin
 // barra superior, sin botones, sin pie de pagina).
 //
 // Nota: se probo dejar el fondo realmente transparente (viendose el

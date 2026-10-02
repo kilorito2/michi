@@ -15,6 +15,8 @@
 //! callback corre dentro de WebView2, y por ejemplo cerrar la pestana desde
 //! el callback de su propio WebView lo destruiria mientras se ejecuta.
 
+use std::time::{Duration, Instant};
+
 use webview2_com::AcceleratorKeyPressedEventHandler;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT};
@@ -28,7 +30,9 @@ const VK_NEXT: u32 = 0x22; // Av Pag
 const VK_ESCAPE: u32 = 0x1B;
 
 /// Engancha los atajos a un WebView (cada pestana y cada pieza de la interfaz).
-pub fn attach(state: &Shared, webview: &WebView) {
+/// `chrome`: es la barra o un panel lateral (ver restore_focus).
+pub fn attach(state: &Shared, webview: &WebView, chrome: bool) {
+    track_focus(state, webview, chrome);
     let s = state.clone();
     let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
         let Some(args) = args else { return Ok(()) };
@@ -55,6 +59,43 @@ pub fn attach(state: &Shared, webview: &WebView) {
     let _ = unsafe { webview.controller().add_AcceleratorKeyPressed(&handler, &mut token) };
 }
 
+/// Recuerda que pieza tiene el foco del teclado: la barra o un panel (se
+/// vuelve a ella al regresar a la ventana) o, con cualquier otra, la pestana.
+fn track_focus(state: &Shared, webview: &WebView, chrome: bool) {
+    use webview2_com::FocusChangedEventHandler;
+    let s = state.clone();
+    let handler = FocusChangedEventHandler::create(Box::new(move |controller, _| {
+        let mut st = s.borrow_mut();
+        if st.focus_settle_until.is_some_and(|t| Instant::now() < t) {
+            return Ok(());
+        }
+        st.focus_owner = if chrome { controller } else { None };
+        Ok(())
+    }));
+    let mut token = 0i64;
+    let _ = unsafe { webview.controller().add_GotFocus(&handler, &mut token) };
+}
+
+/// Al volver a la ventana (Alt+Tab, clic en la barra de tareas) wry le da el
+/// foco a TODOS los WebView, uno atras de otro, y se queda el que se creo
+/// primero: una pestana ya cerrada u oculta, que no recibe las teclas. Se lo
+/// devolvemos a quien lo tenia (la barra o un panel) o a la pestana al frente.
+pub fn restore_focus(state: &Shared) {
+    let owner = {
+        let mut st = state.borrow_mut();
+        // Los avisos de foco de esa tanda no dicen quien lo tenia.
+        st.focus_settle_until = Some(Instant::now() + Duration::from_millis(400));
+        st.focus_owner.clone()
+    };
+    let moved = owner
+        .is_some_and(|c| unsafe { c.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) }.is_ok());
+    if !moved {
+        if let Some(t) = state.borrow().active_tab() {
+            let _ = t.webview.focus();
+        }
+    }
+}
+
 /// Atajos que llegan a la ventana principal (winit) en vez de a un WebView:
 /// pasa cuando ningun WebView tiene el foco, por ejemplo justo al volver a
 /// la ventana con Alt+Tab o al hacer clic en el borde.
@@ -76,6 +117,15 @@ pub fn handle_winit_key(state: &Shared, event: &winit::event::KeyEvent, mods: wi
         KeyCode::PageUp => VK_PRIOR,
         KeyCode::PageDown => VK_NEXT,
         KeyCode::Escape => VK_ESCAPE,
+        KeyCode::Digit1 | KeyCode::Numpad1 => b'1' as u32,
+        KeyCode::Digit2 | KeyCode::Numpad2 => b'2' as u32,
+        KeyCode::Digit3 | KeyCode::Numpad3 => b'3' as u32,
+        KeyCode::Digit4 | KeyCode::Numpad4 => b'4' as u32,
+        KeyCode::Digit5 | KeyCode::Numpad5 => b'5' as u32,
+        KeyCode::Digit6 | KeyCode::Numpad6 => b'6' as u32,
+        KeyCode::Digit7 | KeyCode::Numpad7 => b'7' as u32,
+        KeyCode::Digit8 | KeyCode::Numpad8 => b'8' as u32,
+        KeyCode::Digit9 | KeyCode::Numpad9 => b'9' as u32,
         c => match letters.iter().position(|l| *l == c) {
             Some(i) => b'A' as u32 + i as u32,
             None => return,
@@ -116,6 +166,18 @@ fn handle_key(state: &Shared, vk: u32, ctrl: bool, shift: bool, alt: bool) -> bo
     true
 }
 
+const VK_NUMPAD1: u32 = 0x61;
+const VK_NUMPAD9: u32 = 0x69;
+
+/// Ctrl+'1'..'9' -> indice de pestana (el 9 es siempre la ultima: -1).
+fn tab_index(digit: char) -> i32 {
+    if digit == '9' {
+        -1
+    } else {
+        digit as i32 - '1' as i32
+    }
+}
+
 enum Mapped {
     Action(Action),
     NewTab,
@@ -128,6 +190,10 @@ fn map(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Mapped> {
         (true, false, false, Some('T'), _) => NewTab,
         (true, true, false, Some('T'), _) => A(Action::ReopenClosedTab),
         (true, false, false, Some('W'), _) => A(Action::CloseActiveTab),
+        // Ctrl+1..8: esa pestana; Ctrl+9: la ultima (como Chrome). Tambien con
+        // el teclado numerico (VK_NUMPAD1..9).
+        (true, false, false, Some(d @ '1'..='9'), _) => A(Action::GoToTab(tab_index(d))),
+        (true, false, false, _, VK_NUMPAD1..=VK_NUMPAD9) => A(Action::GoToTab(tab_index((b'1' + (vk - VK_NUMPAD1) as u8) as char))),
         (true, false, false, _, VK_TAB) | (true, false, false, _, VK_NEXT) => A(Action::CycleTab(1)),
         (true, true, false, _, VK_TAB) | (true, false, false, _, VK_PRIOR) => A(Action::CycleTab(-1)),
         (true, false, false, Some('L'), _) | (false, false, true, Some('D'), _) => A(Action::FocusAddressBar),
@@ -137,4 +203,40 @@ fn map(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Mapped> {
         (false, false, true, Some('F'), _) => A(Action::ToggleMenu),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tab_target(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<i32> {
+        match map(vk, ctrl, shift, alt) {
+            Some(Mapped::Action(Action::GoToTab(n))) => Some(n),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn ctrl_digits_pick_a_tab_and_nine_is_the_last() {
+        for (i, digit) in (b'1'..=b'8').enumerate() {
+            assert_eq!(tab_target(digit as u32, true, false, false), Some(i as i32));
+        }
+        assert_eq!(tab_target(b'9' as u32, true, false, false), Some(-1));
+    }
+
+    #[test]
+    fn numpad_digits_work_too() {
+        assert_eq!(tab_target(VK_NUMPAD1, true, false, false), Some(0));
+        assert_eq!(tab_target(VK_NUMPAD1 + 4, true, false, false), Some(4));
+        assert_eq!(tab_target(VK_NUMPAD9, true, false, false), Some(-1));
+    }
+
+    #[test]
+    fn digits_need_exactly_ctrl() {
+        assert_eq!(tab_target(b'1' as u32, false, false, false), None);
+        assert_eq!(tab_target(b'1' as u32, true, true, false), None);
+        assert_eq!(tab_target(b'1' as u32, true, false, true), None);
+        // Ctrl+0 es el zoom de WebView2: no se toca.
+        assert_eq!(tab_target(b'0' as u32, true, false, false), None);
+    }
 }

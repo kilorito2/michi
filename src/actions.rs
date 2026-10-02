@@ -54,6 +54,18 @@ fn run(state: &Shared, action: Action) {
             }
             tabs::activated(state);
         }
+        Action::GoToTab(n) => {
+            {
+                let mut st = state.borrow_mut();
+                let last = st.tabs.len().saturating_sub(1);
+                let target = if n < 0 { last } else { n as usize };
+                if st.tabs.is_empty() || target > last || target == st.active {
+                    return;
+                }
+                st.active = target;
+            }
+            tabs::activated(state);
+        }
         Action::FocusAddressBar => {
             menu::close(state);
             let st = state.borrow();

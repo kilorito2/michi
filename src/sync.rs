@@ -144,6 +144,29 @@ pub fn push_wallpaper(state: &Shared) {
     }
 }
 
+/// Congela (o reanuda) el fondo animado de la interfaz segun la pestana al
+/// frente: mientras reproduce un video o suena algo, los videos de fondo de
+/// la barra, los paneles y el menu quedan en pausa. Medido con TikTok: sin
+/// eso el proceso de GPU del motor gasta el doble (otro decodificador y otra
+/// composicion por cada fondo) y los cuadros del video se atrasan. Barato de
+/// llamar seguido: solo avisa cuando el estado cambia.
+pub fn push_media(state: &Shared) {
+    let frozen = {
+        let mut st = state.borrow_mut();
+        let frozen = st.tabs.get(st.active).is_some_and(|t| t.playing.any());
+        if frozen == st.wallpaper_frozen {
+            return;
+        }
+        st.wallpaper_frozen = frozen;
+        frozen
+    };
+    let st = state.borrow();
+    let js = format!("window.__setWallpaperFrozen && window.__setWallpaperFrozen({frozen})");
+    for view in [&st.topbar, &st.left_panel, &st.right_panel, &st.menu, &st.suggest.view].into_iter().flatten() {
+        let _ = view.evaluate_script(&js);
+    }
+}
+
 /// Le confirma a la pagina de un panel lateral si esta abierto (ver
 /// window.onExpanded en ui/sidebar_*.html y panels::set_expanded).
 pub fn push_expanded(state: &Shared, side: Side) {

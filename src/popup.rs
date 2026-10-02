@@ -96,7 +96,7 @@ fn open(state: &Shared, id: String, right: f64) {
         .build_as_child(window.as_ref());
     let Ok(webview) = webview else { return };
     security::harden(state, &webview);
-    shortcuts::attach(state, &webview);
+    shortcuts::attach(state, &webview, false);
 
     state.borrow_mut().ext_popup = Some(ExtPopup { id, webview, right, sized: false });
     // Descarta el clic que abrio el popup (ver menu::show).

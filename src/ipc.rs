@@ -248,6 +248,18 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
     }
 }
 
+/// La pagina de la pestana avisa que empezo o termino de reproducir un video.
+fn set_video_playing(state: &Shared, tab_id: u64, playing: bool) {
+    {
+        let mut st = state.borrow_mut();
+        match st.tabs.iter_mut().find(|t| t.id == tab_id) {
+            Some(tab) => tab.playing.video = playing,
+            None => return,
+        }
+    }
+    sync::push_media(state);
+}
+
 /// Dispatcher restringido para IPC que llega desde una pestana de
 /// CONTENIDO. Solo se honra si el mensaje viene de una pagina propia
 /// (app://) y la pestana sigue en una, y nunca los comandos de
@@ -255,6 +267,13 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
 /// invocar nada, y ni siquiera nuestras paginas pueden hacer mas de lo que
 /// necesitan (la pestana nueva no puede borrar datos ni tocar extensiones).
 pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &str) {
+    // Lo unico que se acepta de CUALQUIER sitio (ver ui/content_init.js): si
+    // tiene un video reproduciendose. No ejecuta nada: solo congela el fondo
+    // animado de la interfaz mientras tanto (ver sync::push_media).
+    if let Some(flag) = raw.strip_prefix("michi:media:") {
+        set_video_playing(state, tab_id, flag == "1");
+        return;
+    }
     let Some(page) = own_page_path(source) else { return };
     let trusted = state
         .borrow()

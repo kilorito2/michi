@@ -95,7 +95,7 @@ impl ApplicationHandler<UserEvent> for App {
         let suggestions = suggest::build(&self.state);
         for wv in [&topbar, &left, &right, &menu, &suggestions] {
             security::harden(&self.state, wv);
-            shortcuts::attach(&self.state, wv);
+            shortcuts::attach(&self.state, wv, wv_is_chrome(wv, &topbar, &left, &right));
         }
         {
             let mut st = self.state.borrow_mut();
@@ -123,6 +123,10 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             WindowEvent::CloseRequested => security::quit(&self.state),
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
+            // Al volver con Alt+Tab, wry le da el foco a todos los WebView uno
+            // atras de otro y se queda el primero que se creo (a veces una
+            // pestana ya oculta): los atajos no andaban hasta hacer clic.
+            WindowEvent::Focused(true) => shortcuts::restore_focus(&self.state),
             WindowEvent::KeyboardInput { event, .. } => {
                 shortcuts::handle_winit_key(&self.state, &event, self.modifiers)
             }
@@ -206,6 +210,12 @@ impl ApplicationHandler<UserEvent> for App {
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }
     }
+}
+
+/// La barra y los paneles laterales: si uno tiene el foco del teclado, al
+/// volver a la ventana se lo devolvemos a el (ver shortcuts::restore_focus).
+fn wv_is_chrome(wv: &wry::WebView, topbar: &wry::WebView, left: &wry::WebView, right: &wry::WebView) -> bool {
+    [topbar, left, right].into_iter().any(|c| std::ptr::eq(c, wv))
 }
 
 /// Icono de la ventana (titulo, Alt+Tab) y de la barra de tareas: el mismo

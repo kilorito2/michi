@@ -128,6 +128,10 @@ fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Enviro
                     if let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) {
                         tab.url = page_url.clone();
                         tab.loading = matches!(event, PageLoadEvent::Started);
+                        // La pagina nueva avisa por su cuenta si reproduce algo.
+                        if tab.loading {
+                            tab.playing.video = false;
+                        }
                     }
                     let tab = st.tabs.iter().find(|t| t.id == id);
                     let title = tab.map(|t| t.title.clone()).unwrap_or_default();
@@ -152,6 +156,7 @@ fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Enviro
                     }
                     st.save_session();
                 }
+                sync::push_media(&state_load);
                 sync::push_history(&state_load);
                 sync::push_active_tab(&state_load);
                 sync::push_tabs(&state_load);
@@ -171,10 +176,10 @@ fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Enviro
     security::attach_tab(state, &webview, id);
     on_source_changed(state, &webview, id);
     attach_favicon(state, &webview, id);
-    crate::audio::attach(&webview);
+    crate::audio::attach(state, &webview, id);
     crate::fullscreen::attach(state, &webview, id);
     permissions::attach(state, &webview);
-    shortcuts::attach(state, &webview);
+    shortcuts::attach(state, &webview, false);
     downloads::attach(state, &webview);
     if (zoom - 1.0).abs() > f64::EPSILON {
         let _ = webview.zoom(zoom);
@@ -191,6 +196,7 @@ fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Enviro
             loading: true,
             favicon: None,
             sec: Default::default(),
+            playing: Default::default(),
         });
         st.active = st.tabs.len() - 1;
     }
@@ -294,6 +300,7 @@ pub fn activated(state: &Shared) {
     crate::popup::close(state);
     crate::fullscreen::on_tab_switch(state);
     layout::relayout(state);
+    sync::push_media(state);
     // Como cualquier navegador: la pestana que queda al frente recibe el
     // foco del teclado (en la pestana nueva, su buscador ya queda listo para
     // escribir; y los atajos de teclado llegan por su WebView).

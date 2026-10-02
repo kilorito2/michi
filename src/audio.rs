@@ -28,19 +28,26 @@ const WEBVIEW_EXE: &str = "msedgewebview2.exe";
 /// Hay intentos en curso (no hace falta lanzar otros).
 static BUSY: AtomicBool = AtomicBool::new(false);
 
-/// Avisa cuando una pestana empieza a sonar (ICoreWebView2_8).
-pub fn attach(webview: &wry::WebView) {
+/// Avisa cuando una pestana empieza o deja de sonar (ICoreWebView2_8): se le
+/// pone el nombre a la sesion de audio, y la interfaz congela su fondo
+/// animado mientras suena (ver sync::push_media).
+pub fn attach(state: &crate::state::Shared, webview: &wry::WebView, id: u64) {
     use webview2_com::IsDocumentPlayingAudioChangedEventHandler;
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
     use wry::WebViewExtWindows;
 
     let Ok(core) = webview.webview().cast::<ICoreWebView2_8>() else { return };
-    let handler = IsDocumentPlayingAudioChangedEventHandler::create(Box::new(|sender, _| {
+    let state = state.clone();
+    let handler = IsDocumentPlayingAudioChangedEventHandler::create(Box::new(move |sender, _| {
         let Some(sender) = sender else { return Ok(()) };
         let mut playing = windows_core::BOOL::default();
         if let Ok(core) = sender.cast::<ICoreWebView2_8>() {
             let _ = unsafe { core.IsDocumentPlayingAudio(&mut playing) };
         }
+        if let Some(tab) = state.borrow_mut().tabs.iter_mut().find(|t| t.id == id) {
+            tab.playing.audio = playing.as_bool();
+        }
+        crate::sync::push_media(&state);
         if playing.as_bool() {
             let mut pid = 0u32;
             let _ = unsafe { sender.BrowserProcessId(&mut pid) };

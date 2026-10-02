@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    ICoreWebView2Deferral, ICoreWebView2Environment, ICoreWebView2NewWindowRequestedEventArgs,
+    ICoreWebView2Controller, ICoreWebView2Deferral, ICoreWebView2Environment, ICoreWebView2NewWindowRequestedEventArgs,
 };
 use winit::event_loop::EventLoopProxy;
 use winit::window::Window;
@@ -85,6 +85,23 @@ pub struct Tab {
     pub favicon: Option<String>,
     /// HTTPS primero, lo bloqueado en la pagina actual... (ver security.rs).
     pub sec: TabSecurity,
+    /// La pagina tiene un <video> reproduciendose (lo avisa ui/content_init.js,
+    /// ver ipc::media_message) o suena (ver audio::attach). Con eso la
+    /// interfaz congela su fondo animado (ver sync::push_media).
+    pub playing: Playing,
+}
+
+/// Que esta reproduciendo una pestana.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub struct Playing {
+    pub video: bool,
+    pub audio: bool,
+}
+
+impl Playing {
+    pub fn any(self) -> bool {
+        self.video || self.audio
+    }
 }
 
 /// Eventos propios que despiertan el bucle de winit. Hace falta porque los
@@ -128,6 +145,8 @@ pub enum Action {
     ReopenClosedTab,
     /// +1 / -1: siguiente/anterior pestana (con vuelta).
     CycleTab(i32),
+    /// Ir a la pestana N (0 = la primera; negativo = la ultima): Ctrl+1..9.
+    GoToTab(i32),
     FocusAddressBar,
     ToggleBookmark,
     /// Abre el panel izquierdo (historial, descargas, marcadores).
@@ -296,6 +315,16 @@ pub struct AppState {
     /// Hosts cuya pagina mostro un certificado invalido en esta sesion: la
     /// barra los marca como no seguros aunque sean https://.
     pub cert_errors: HashSet<String>,
+    /// Pieza de la interfaz (barra o panel) que tenia el foco del teclado, para
+    /// devolvercelo al volver a la ventana (ver shortcuts::restore_focus).
+    /// None = la pestana al frente.
+    pub focus_owner: Option<ICoreWebView2Controller>,
+    /// Hasta cuando ignorar los avisos de foco: al volver a la ventana wry le
+    /// da el foco a TODOS los WebView, uno atras de otro (ver restore_focus).
+    pub focus_settle_until: Option<Instant>,
+    /// El fondo animado de la interfaz esta congelado porque la pestana al
+    /// frente reproduce video o audio (ver sync::push_media).
+    pub wallpaper_frozen: bool,
     /// Cerrando con "borrar datos al cerrar": hasta cuando esperar a que
     /// termine el borrado antes de salir igual (ver security::quit).
     pub quit_deadline: Option<Instant>,
@@ -337,6 +366,9 @@ impl AppState {
             import_sources: Vec::new(),
             http_allowed: HashSet::new(),
             cert_errors: HashSet::new(),
+            focus_owner: None,
+            focus_settle_until: None,
+            wallpaper_frozen: false,
             quit_deadline: None,
             next_id: 1,
         }
