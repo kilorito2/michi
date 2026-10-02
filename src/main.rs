@@ -9,6 +9,7 @@ mod chrome;
 mod crx;
 mod downloads;
 mod extensions;
+mod fullscreen;
 mod import;
 mod ipc;
 mod layout;

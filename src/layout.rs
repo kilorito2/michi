@@ -14,6 +14,10 @@
 //! paneles los tapaba. Por eso relayout vuelve a subir la barra y los
 //! paneles al tope (ver raise_chrome) cada vez que se llama, lo que incluye
 //! abrir, cerrar o cambiar de pestana.
+//!
+//! Con un video (o cualquier pagina) en pantalla completa, la pestana activa
+//! ocupa toda la ventana y la barra y los paneles se ocultan (ver
+//! fullscreen.rs).
 
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::{Rect, WebView};
@@ -24,16 +28,23 @@ pub fn relayout(state: &Shared) {
     let st = state.borrow();
     let Some(window) = st.window.as_ref() else { return };
     let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+    let fullscreen = crate::fullscreen::is_active(&st);
 
-    let content_h = (size.height - TOPBAR_H).max(0.0);
-    let content_w = (size.width - 2.0 * EDGE_IDLE).max(0.0);
+    let content = if fullscreen {
+        rect(0.0, 0.0, size.width, size.height)
+    } else {
+        rect(EDGE_IDLE, TOPBAR_H, (size.width - 2.0 * EDGE_IDLE).max(0.0), (size.height - TOPBAR_H).max(0.0))
+    };
 
     if let Some(tb) = &st.topbar {
         let _ = tb.set_bounds(rect(0.0, 0.0, size.width, TOPBAR_H));
     }
+    for wv in [&st.topbar, &st.left_panel, &st.right_panel].into_iter().flatten() {
+        let _ = wv.set_visible(!fullscreen);
+    }
 
     if let Some(active_tab) = st.tabs.get(st.active) {
-        let _ = active_tab.webview.set_bounds(rect(EDGE_IDLE, TOPBAR_H, content_w, content_h));
+        let _ = active_tab.webview.set_bounds(content);
         let _ = active_tab.webview.set_visible(true);
     }
 

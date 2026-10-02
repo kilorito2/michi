@@ -63,6 +63,10 @@ pub fn toggle(state: &Shared) {
 pub fn show(state: &Shared) {
     {
         let mut st = state.borrow_mut();
+        // Alt+F con un video en pantalla completa: la barra esta oculta.
+        if crate::fullscreen::is_active(&st) {
+            return;
+        }
         let Some(window) = st.window.clone() else { return };
         let Some(menu) = &st.menu else { return };
         let size = window.inner_size().to_logical::<f64>(window.scale_factor());

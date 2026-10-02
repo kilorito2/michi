@@ -87,9 +87,13 @@ pub fn handle_winit_key(state: &Shared, event: &winit::event::KeyEvent, mods: wi
 /// Si la tecla (con los modificadores apretados ahora) es un atajo, encola
 /// su accion y devuelve true (la tecla queda "manejada").
 fn handle_key(state: &Shared, vk: u32, ctrl: bool, shift: bool, alt: bool) -> bool {
-    // Escape solo es nuestro si el menu esta abierto; si no, es de la
-    // pagina (cerrar un modal, salir de pantalla completa...).
+    // Escape solo es nuestro si el menu esta abierto o la pagina esta en
+    // pantalla completa (como en Chrome, sale siempre, aunque el sitio no
+    // lo maneje); si no, es de la pagina (cerrar un modal...).
     if vk == VK_ESCAPE && !ctrl && !shift && !alt {
+        if crate::fullscreen::exit(state) {
+            return true;
+        }
         let (menu_open, popup_open) = {
             let st = state.borrow();
             (st.menu_open, st.ext_popup.is_some())

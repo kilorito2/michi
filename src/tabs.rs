@@ -172,6 +172,7 @@ fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Enviro
     on_source_changed(state, &webview, id);
     attach_favicon(state, &webview, id);
     crate::audio::attach(&webview);
+    crate::fullscreen::attach(state, &webview, id);
     permissions::attach(state, &webview);
     shortcuts::attach(state, &webview);
     downloads::attach(state, &webview);
@@ -291,6 +292,7 @@ fn set_favicon(state: &Shared, id: u64, data_url: Option<String>) {
 pub fn activated(state: &Shared) {
     // El popup de una extension actua sobre la pestana que estaba al frente.
     crate::popup::close(state);
+    crate::fullscreen::on_tab_switch(state);
     layout::relayout(state);
     // Como cualquier navegador: la pestana que queda al frente recibe el
     // foco del teclado (en la pestana nueva, su buscador ya queda listo para

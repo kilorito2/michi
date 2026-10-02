@@ -47,6 +47,9 @@ const SIDES: [Side; 2] = [Side::Left, Side::Right];
 pub fn set_expanded(state: &Shared, side: Side, value: bool) {
     let changed = {
         let mut st = state.borrow_mut();
+        // Con un video en pantalla completa los paneles van ocultos, y un
+        // atajo (Ctrl+H) o una descarga no los abre igual por encima.
+        let value = value && !crate::fullscreen::is_active(&st);
         let p = st.panel_mut(side);
         p.outside_since = None;
         if !value {
@@ -85,7 +88,19 @@ pub fn set_expanded(state: &Shared, side: Side, value: bool) {
 /// siempre) o haya un clic fuera de el.
 pub fn open_held(state: &Shared, side: Side) {
     set_expanded(state, side, true);
-    state.borrow_mut().panel_mut(side).held = true;
+    let mut st = state.borrow_mut();
+    let p = st.panel_mut(side);
+    p.held = p.expanded;
+}
+
+/// Cierra un panel de golpe, sin animacion: al entrar en pantalla completa
+/// (ver fullscreen.rs), donde se oculta igual.
+pub fn close_now(state: &Shared, side: Side) {
+    set_expanded(state, side, false);
+    let mut st = state.borrow_mut();
+    let p = st.panel_mut(side);
+    p.anim = None;
+    p.progress = 0.0;
 }
 
 /// Avanza las animaciones y el vigilante del cursor. Se llama en cada vuelta

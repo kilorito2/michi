@@ -150,6 +150,9 @@ pub enum Action {
     LoadUrl(u64, String),
     /// Cierra una pestana por id: la propia pagina llamo a window.close().
     CloseTab(u64),
+    /// La pagina de una pestana (id) entro o salio de pantalla completa
+    /// (ver fullscreen.rs).
+    Fullscreen(u64, bool),
 }
 
 /// Una ventana que abrio una pagina con window.open(), esperando su pestana.
@@ -252,6 +255,9 @@ pub struct AppState {
 
     pub tabs: Vec<Tab>,
     pub active: usize,
+    /// Pestana cuya pagina esta en pantalla completa (un video), si hay una.
+    /// Ver fullscreen.rs.
+    pub fullscreen: Option<u64>,
 
     pub left: PanelState,
     pub right: PanelState,
@@ -315,6 +321,7 @@ impl AppState {
             ext_popup_closed: None,
             tabs: Vec::new(),
             active: 0,
+            fullscreen: None,
             left: PanelState::new(),
             right: PanelState::new(),
             proxy: None,

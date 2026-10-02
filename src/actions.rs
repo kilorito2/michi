@@ -6,7 +6,7 @@ use wry::WebViewExtWindows;
 
 use crate::state::{own_page_path, Action, Shared, Side, SETTINGS_URL};
 use crate::storage::Bookmark;
-use crate::{layout, menu, native, panels, popup, sync, tabs};
+use crate::{fullscreen, layout, menu, native, panels, popup, sync, tabs};
 
 /// Pasos de zoom (los mismos que Chrome/Edge).
 const ZOOM_STEPS: &[f64] = &[0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0];
@@ -110,6 +110,7 @@ fn run(state: &Shared, action: Action) {
             }
         }
         Action::CloseTab(id) => tabs::close_tab(state, id),
+        Action::Fullscreen(id, on) => fullscreen::set(state, id, on),
     }
 }
 
