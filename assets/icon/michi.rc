@@ -7,8 +7,8 @@
 // FileDescription/ProductName = "Michi", aparece como "Michi" a secas.
 // NOTA: al cambiar la version en Cargo.toml, actualizar los 4 numeros de aca.
 1 VERSIONINFO
-FILEVERSION 0,1,2,0
-PRODUCTVERSION 0,1,2,0
+FILEVERSION 0,1,3,0
+PRODUCTVERSION 0,1,3,0
 FILEOS 0x40004L
 FILETYPE 0x1L
 BEGIN
@@ -18,12 +18,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Michi"
             VALUE "FileDescription", "Michi"
-            VALUE "FileVersion", "0.1.2.0"
+            VALUE "FileVersion", "0.1.3.0"
             VALUE "InternalName", "Michi"
             VALUE "LegalCopyright", "Michi"
             VALUE "OriginalFilename", "michi.exe"
             VALUE "ProductName", "Michi"
-            VALUE "ProductVersion", "0.1.2.0"
+            VALUE "ProductVersion", "0.1.3.0"
         END
     END
     BLOCK "VarFileInfo"

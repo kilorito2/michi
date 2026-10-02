@@ -7,7 +7,7 @@
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-2021-CE422B?style=for-the-badge&logo=rust&logoColor=white)
 ![WebView2](https://img.shields.io/badge/Motor-WebView2%20(Chromium)-0A7CFF?style=for-the-badge&logo=microsoftedge&logoColor=white)
-![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.2-ff7a1a?style=for-the-badge)
+![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.3-ff7a1a?style=for-the-badge)
 ![Licencia MIT](https://img.shields.io/badge/licencia-MIT-8b7bff?style=for-the-badge)
 
 ### [Descargar el instalador](https://github.com/kilorito2/michi/releases/latest)
@@ -118,6 +118,11 @@ sistema, así se ven como una sola imagen continua.
 
 Se cambian desde la pestaña nueva o en **Ajustes › Apariencia**.
 
+Mientras la pestaña que estás viendo reproduce un video o suena algo (TikTok,
+YouTube...), los fondos de la barra y los paneles **se congelan** en su último
+cuadro y se reanudan solos al terminar: cada fondo es un decodificador de video
+y una composición más, y la GPU hace falta para el video de la página.
+
 ### <img src="docs/icons/importar.svg" width="22" height="22" alt=""> Importar de otro navegador
 
 En **Ajustes › Importar**, Michi detecta los navegadores instalados en la PC y
@@ -164,6 +169,7 @@ estás viendo.
 | Nueva pestaña | <kbd>Ctrl</kbd> + <kbd>T</kbd> |
 | Cerrar pestaña | <kbd>Ctrl</kbd> + <kbd>W</kbd> |
 | Reabrir pestaña cerrada | <kbd>Ctrl</kbd> + <kbd>Mayús</kbd> + <kbd>T</kbd> |
+| Ir a la pestaña 1 a 8 / a la última | <kbd>Ctrl</kbd> + <kbd>1</kbd> … <kbd>8</kbd> / <kbd>Ctrl</kbd> + <kbd>9</kbd> |
 | Pestaña siguiente / anterior | <kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>Mayús</kbd> + <kbd>Tab</kbd> |
 | Ir a la barra de direcciones | <kbd>Ctrl</kbd> + <kbd>L</kbd> o <kbd>Alt</kbd> + <kbd>D</kbd> |
 | Recorrer las sugerencias de la barra | <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Enter</kbd> para abrir, <kbd>Esc</kbd> para cerrar |
@@ -349,7 +355,7 @@ Michi tiene su propio instalador, hecho con la misma base que el navegador
 y con su misma estética: el **fondo animado detrás del vidrio** (que cambia en
 vivo al elegir otro), el zorro y los colores de su degradado.
 
-**Descarga:** `Michi-Setup-0.1.2.exe` en
+**Descarga:** `Michi-Setup-0.1.3.exe` en
 [Releases](https://github.com/kilorito2/michi/releases/latest). No está firmado
 digitalmente, así que Windows puede mostrar el aviso de SmartScreen la primera
 vez: *Más información › Ejecutar de todas formas*.
@@ -587,7 +593,9 @@ sirve los originales 4K de `assets/wallpapers/`, sino las versiones de
 `protocol.rs` lee solo el rango pedido por el `<video>`, en un hilo aparte.
 `ui/wallpaper.js` sincroniza todas las superficies con el reloj del sistema (para
 que se vean como un único fondo), cambia de tema sin dejar un hueco mientras
-carga el nuevo y pausa el video de las pestañas en segundo plano. Un fondo
+carga el nuevo pausa el video de las pestañas en segundo plano y congela los fondos mientras la
+pestaña al frente reproduce un video o sonido (`ui/content_init.js` avisa cuando
+hay un `<video>` reproduciéndose; `sync::push_media` lo reparte). Un fondo
 también puede ser una imagen fija (`.jpg`), animada con un zoom lento por CSS.
 
 Para agregar un fondo: poner el original en `assets/wallpapers/`, sumarlo a
