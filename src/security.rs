@@ -43,7 +43,13 @@ use crate::{protocol, storage, sync};
 /// msSmartScreenProtection", que apaga SmartScreen (el filtro de sitios de
 /// phishing y malware, y de descargas peligrosas). Dejamos solo lo otro: el
 /// mini menu que aparece al seleccionar texto.
-pub const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI";
+///
+/// AudioServiceOutOfProcess: el audio se reproduce en el proceso principal de
+/// WebView2 y no en un proceso aparte. Discord (y OBS) captan el sonido de una
+/// ventana por "arbol de procesos", y Windows solo incluye hijos directos: con
+/// el servicio de audio aparte quedaba como nieto de michi.exe y al compartir
+/// la ventana el video se veia pero no se escuchaba (ver audio.rs).
+pub const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,AudioServiceOutOfProcess";
 
 /// Cuanto esperar a que un sitio responda por HTTPS antes de volver a HTTP:
 /// sin esto, un sitio que no atiende el puerto 443 (los paquetes se pierden,
