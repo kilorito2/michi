@@ -162,6 +162,7 @@ fn handle_key(state: &Shared, vk: u32, ctrl: bool, shift: bool, alt: bool) -> bo
     match action {
         Mapped::Action(a) => st.request(a),
         Mapped::NewTab => st.request_tab(crate::state::HOME_URL),
+        Mapped::NewIncognitoTab => st.request_tab_in(crate::state::HOME_URL, true),
     }
     true
 }
@@ -181,13 +182,15 @@ fn tab_index(digit: char) -> i32 {
 enum Mapped {
     Action(Action),
     NewTab,
+    NewIncognitoTab,
 }
 
 fn map(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Mapped> {
-    use Mapped::{Action as A, NewTab};
+    use Mapped::{Action as A, NewIncognitoTab, NewTab};
     let key = char::from_u32(vk).filter(|c| c.is_ascii_alphanumeric());
     Some(match (ctrl, shift, alt, key, vk) {
         (true, false, false, Some('T'), _) => NewTab,
+        (true, true, false, Some('N'), _) => NewIncognitoTab,
         (true, true, false, Some('T'), _) => A(Action::ReopenClosedTab),
         (true, false, false, Some('W'), _) => A(Action::CloseActiveTab),
         // Ctrl+1..8: esa pestana; Ctrl+9: la ultima (como Chrome). Tambien con
@@ -222,6 +225,14 @@ mod tests {
             assert_eq!(tab_target(digit as u32, true, false, false), Some(i as i32));
         }
         assert_eq!(tab_target(b'9' as u32, true, false, false), Some(-1));
+    }
+
+    #[test]
+    fn ctrl_shift_n_opens_an_incognito_tab() {
+        assert!(matches!(map(b'N' as u32, true, true, false), Some(Mapped::NewIncognitoTab)));
+        // Ctrl+N solo no es nuestro, ni Ctrl+Mayus+N con Alt.
+        assert!(map(b'N' as u32, true, false, false).is_none());
+        assert!(map(b'N' as u32, true, true, true).is_none());
     }
 
     #[test]

@@ -24,7 +24,8 @@ use crate::native::ClearKinds;
 use crate::state::{is_own_page, own_page_path, Action, Shared, Side, UserEvent, HOME_LOAD_URL, HOME_URL};
 use crate::storage::{self, Settings};
 use crate::{
-    actions, downloads, extensions, import, menu, native, panels, permissions, protocol, security, suggest, sync, tabs,
+    actions, downloads, extensions, import, menu, native, panels, perf, permissions, protocol, security, suggest, sync,
+    tabs,
 };
 
 #[derive(Deserialize, Debug)]
@@ -38,6 +39,8 @@ pub enum Command {
     Forward,
     Reload,
     NewTab,
+    /// Pestana nueva de incognito (ver Tab::incognito).
+    NewIncognitoTab,
     CloseTab { id: u64 },
     SwitchTab { id: u64 },
     DragWindow,
@@ -140,6 +143,7 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
         Command::Forward => with_active(state, |w| { let _ = w.go_forward(); }),
         Command::Reload => with_active(state, |w| { let _ = w.reload(); }),
         Command::NewTab => state.borrow_mut().request_tab(HOME_URL),
+        Command::NewIncognitoTab => state.borrow_mut().request_tab_in(HOME_URL, true),
         Command::CloseTab { id } => tabs::close_tab(state, id),
         Command::SwitchTab { id } => {
             {
@@ -237,6 +241,8 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
             sync::push_history(state);
             sync::push_bookmarks(state);
             sync::push_maximized(state);
+            // Antes que el fondo: asi se crea ya como imagen fija, no como video.
+            sync::push_perf(state);
             sync::push_wallpaper(state);
             sync::push_menu(state);
             extensions::refresh(state);
@@ -289,8 +295,10 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
     let Ok(cmd) = serde_json::from_str::<Command>(raw) else { return };
     match (page, cmd) {
         (_, Command::Ready) => {
+            sync::push_perf(state);
             sync::push_wallpaper(state);
             sync::push_own_pages(state);
+            sync::push_incognito(state, tab_id);
             match page {
                 "/settings" => {
                     extensions::refresh(state);
@@ -302,6 +310,7 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
             }
         }
         ("/", cmd @ (Command::SetTheme { .. } | Command::Search { .. })) => handle_page_command(state, cmd),
+        ("/settings", Command::NewIncognitoTab) => state.borrow_mut().request_tab_in(HOME_URL, true),
         (
             "/settings",
             cmd @ (Command::SetTheme { .. }
@@ -348,6 +357,7 @@ fn handle_page_command(state: &Shared, cmd: Command) {
             }
             security::apply_smartscreen(state);
             security::apply_tracking_prevention(state);
+            perf::on_mode_changed(state);
             sync::push_own_pages(state);
             sync::push_wallpaper(state);
             sync::push_toast(state, "Ajustes restablecidos");
@@ -457,6 +467,7 @@ fn set_setting(state: &Shared, key: &str, value: Value) {
             }
             ("clearOnExit", Value::Bool(v)) => s.clear_on_exit = *v,
             ("searchSuggestions", Value::Bool(v)) => s.search_suggestions = *v,
+            ("performance", Value::String(v)) if perf::IDS.contains(&v.as_str()) => s.performance = v.clone(),
             ("downloadsDir", Value::Null) => s.downloads_dir = None,
             _ => {
                 eprintln!("[ipc] ajuste invalido {key} = {value}");
@@ -469,6 +480,7 @@ fn set_setting(state: &Shared, key: &str, value: Value) {
         "theme" => sync::push_wallpaper(state),
         "smartscreen" => security::apply_smartscreen(state),
         "trackingPrevention" => security::apply_tracking_prevention(state),
+        "performance" => perf::on_mode_changed(state),
         // Lo que no tiene que quedar en el disco, desde ya.
         "clearOnExit" if value == Value::Bool(true) => storage::remove(storage::SESSION_FILE),
         _ => {}
@@ -492,6 +504,10 @@ fn menu_action(state: &Shared, action: &str) {
         "new_tab" => {
             st.request(Action::CloseMenu);
             st.request_tab(HOME_URL);
+        }
+        "new_incognito_tab" => {
+            st.request(Action::CloseMenu);
+            st.request_tab_in(HOME_URL, true);
         }
         "reopen_tab" => {
             st.request(Action::CloseMenu);

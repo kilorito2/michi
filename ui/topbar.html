@@ -31,6 +31,22 @@
     background: linear-gradient(180deg, rgba(30,28,46,0.55), rgba(20,18,34,0.45));
     border-bottom: 1px solid var(--glass-border);
   }
+  /* Pestana de incognito al frente: la barra se tine de violeta y la direccion
+     lleva su etiqueta (ver Tab::incognito en src/state.rs). */
+  .bar.incognito {
+    background: linear-gradient(180deg, rgba(62,36,98,0.66), rgba(36,20,62,0.56));
+    border-bottom-color: rgba(176,140,255,0.42);
+  }
+  .bar.incognito .addr-wrap:focus-within { border-color: #b08cff; }
+  .incog {
+    flex: none; display: flex; align-items: center; gap: 5px;
+    height: 22px; padding: 0 9px 0 7px; margin-left: -7px; border-radius: 999px;
+    background: rgba(176,140,255,0.22); color: #d6c3ff; font-size: 12px; white-space: nowrap;
+  }
+  .incog[hidden] { display: none; }
+  .incog + .sec { margin-left: 0; }
+  .incog svg { display: block; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
   .btn {
     display: flex; align-items: center; justify-content: center;
     width: 30px; height: 30px;
@@ -165,6 +181,7 @@
     <div class="drag-spacer"></div>
 
     <div class="addr-wrap" id="addr">
+      <div class="incog" id="incog" hidden title="Esta pestana es de incognito: no deja historial ni cookies al cerrarla. Tu proveedor de internet y los sitios que visitas igual pueden ver lo que haces."><svg viewBox="0 0 24 24"><path d="M5 21V11a7 7 0 0 1 14 0v10l-2.4-2-2.3 2-2.3-2-2.3 2L7.4 19z"/><circle cx="9.6" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg><span>Incognito</span></div>
       <div class="sec" id="sec" data-state="internal"><span id="sec-icon"></span><span class="sec-label" id="sec-label"></span></div>
       <div class="url-box">
         <input id="url" spellcheck="false" placeholder="Buscar o escribir una direccion web" />
@@ -392,6 +409,9 @@
       urlInput.value = data.security === 'internal' ? '' : data.url;
       showUrl(data.url, data.security);
     }
+    // Pestana de incognito: barra violeta y etiqueta.
+    bar.classList.toggle('incognito', !!data.incognito);
+    document.getElementById('incog').hidden = !data.incognito;
     const sec = document.getElementById('sec');
     const info = SEC[data.security] || SEC.other;
     sec.setAttribute('data-state', data.security);

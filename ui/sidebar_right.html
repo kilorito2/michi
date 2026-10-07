@@ -90,6 +90,13 @@
   .tab-ico img { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; }
   .tab-ico .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
   .tab-row.active .tab-ico .dot { background: #7cf29c; }
+  /* Pestana de incognito: borde violeta y un fantasma en vez del punto. */
+  .tab-row.incognito { background: rgba(176,140,255,0.10); }
+  .tab-row.incognito:hover { background: rgba(176,140,255,0.18); }
+  .tab-row.incognito.active { background: rgba(176,140,255,0.22); border-color: #b08cff; }
+  .tab-ghost { flex: none; width: 15px; height: 15px; color: #c9b3ff; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  .tab-ico .tab-ghost { width: 16px; height: 16px; }
+  .tab-row.incognito .tab-title { color: #ece3ff; }
   .tab-title { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tab-close {
     flex: none; width: 18px; height: 18px; border-radius: 6px;
@@ -153,13 +160,19 @@
     list.innerHTML = '';
     tabs.forEach((t) => {
       const row = document.createElement('div');
-      row.className = 'tab-row' + (t.active ? ' active' : '');
+      row.className = 'tab-row' + (t.active ? ' active' : '') + (t.incognito ? ' incognito' : '');
+      row.title = t.incognito ? 'Pestana de incognito' : '';
       row.addEventListener('click', () => ipc('switch_tab', { id: t.id }));
 
       const ico = document.createElement('div');
       ico.className = 'tab-ico';
+      const GHOST = '<svg class="tab-ghost" viewBox="0 0 24 24"><path d="M5 21V11a7 7 0 0 1 14 0v10l-2.4-2-2.3 2-2.3-2-2.3 2L7.4 19z"/><circle cx="9.6" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg>';
       function showDot() {
         ico.innerHTML = '';
+        if (t.incognito) {
+          ico.innerHTML = GHOST;
+          return;
+        }
         const dot = document.createElement('span');
         dot.className = 'dot';
         ico.appendChild(dot);
@@ -177,7 +190,7 @@
 
       const title = document.createElement('div');
       title.className = 'tab-title';
-      title.textContent = t.title && t.title.length ? t.title : 'Nueva pestana';
+      title.textContent = t.title && t.title.length ? t.title : (t.incognito ? 'Nueva pestana de incognito' : 'Nueva pestana');
 
       const close = document.createElement('div');
       close.className = 'tab-close';
@@ -186,6 +199,14 @@
 
       row.appendChild(ico);
       row.appendChild(title);
+      // Con el favicon del sitio en el icono, el fantasma va aca: asi una de
+      // incognito se distingue siempre.
+      if (t.incognito && t.favicon) {
+        const badge = document.createElement('span');
+        badge.style.display = 'flex';
+        badge.innerHTML = GHOST;
+        row.appendChild(badge);
+      }
       row.appendChild(close);
       list.appendChild(row);
     });

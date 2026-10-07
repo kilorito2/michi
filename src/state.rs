@@ -22,7 +22,7 @@ pub const EDGE_IDLE: f64 = 10.0;
 pub const PANEL_W: f64 = 300.0;
 /// Tamano del menu "..." (ver menu.rs y ui/menu.html).
 pub const MENU_W: f64 = 290.0;
-pub const MENU_H: f64 = 440.0;
+pub const MENU_H: f64 = 474.0;
 
 /// Tamano minimo de la ventana (ver with_min_inner_size en main.rs). Tambien
 /// se usa en sync::push_wallpaper como umbral para descartar un tamano
@@ -89,6 +89,12 @@ pub struct Tab {
     /// ver ipc::media_message) o suena (ver audio::attach). Con eso la
     /// interfaz congela su fondo animado (ver sync::push_media).
     pub playing: Playing,
+    /// Pestana de incognito: usa un perfil aparte, en memoria (InPrivate de
+    /// WebView2), y no deja rastro en el historial, la sesion ni las
+    /// sugerencias. Se decide al crearla y no cambia.
+    pub incognito: bool,
+    /// Descanso de la pestana en los modos de rendimiento (ver perf.rs).
+    pub rest: crate::perf::Rest,
 }
 
 /// Que esta reproduciendo una pestana.
@@ -187,6 +193,9 @@ pub struct PendingWindow {
     pub deferral: ICoreWebView2Deferral,
     /// El de la pagina que la abre: WebView2 exige el mismo.
     pub environment: ICoreWebView2Environment,
+    /// La pagina que la abre es de incognito: la ventana nueva tambien (si no,
+    /// WebView2 la rechaza: el perfil tiene que ser el mismo).
+    pub incognito: bool,
 }
 
 /// Popup de extension abierto (ver popup.rs).
@@ -283,8 +292,8 @@ pub struct AppState {
 
     /// Para despertar el bucle de eventos desde un callback de WebView2.
     pub proxy: Option<EventLoopProxy<UserEvent>>,
-    /// Pestanas pedidas (URL) que todavia no se crearon. Ver request_tab.
-    pub pending_tabs: Vec<String>,
+    /// Pestanas pedidas (URL, de incognito) que todavia no se crearon. Ver request_tab.
+    pub pending_tabs: Vec<(String, bool)>,
     /// window.open() de una pagina, esperando su pestana (ver PendingWindow).
     pub pending_windows: Vec<PendingWindow>,
     /// Acciones diferidas a la proxima vuelta del bucle (ver Action).
@@ -328,6 +337,9 @@ pub struct AppState {
     /// Cerrando con "borrar datos al cerrar": hasta cuando esperar a que
     /// termine el borrado antes de salir igual (ver security::quit).
     pub quit_deadline: Option<Instant>,
+    /// Michi es la ventana en primer plano (y no esta minimizada). Solo se
+    /// vigila con un modo de rendimiento activo (ver perf::tick).
+    pub foreground: bool,
 
     next_id: u64,
 }
@@ -370,6 +382,7 @@ impl AppState {
             focus_settle_until: None,
             wallpaper_frozen: false,
             quit_deadline: None,
+            foreground: true,
             next_id: 1,
         }
     }
@@ -410,8 +423,19 @@ impl AppState {
     /// La app no se congelaba del todo (seguia bombeando mensajes), pero la
     /// pestana nueva nunca terminaba de crearse y nada volvia a actualizarse.
     pub fn request_tab(&mut self, url: &str) {
-        self.pending_tabs.push(url.to_string());
+        self.request_tab_in(url, false);
+    }
+
+    /// Lo mismo, indicando si la pestana es de incognito.
+    pub fn request_tab_in(&mut self, url: &str, incognito: bool) {
+        self.pending_tabs.push((url.to_string(), incognito));
         self.wake();
+    }
+
+    /// Si la pestana al frente es de incognito: lo que se abre desde ella (un
+    /// enlace, una ventana emergente) tambien lo es.
+    pub fn active_is_incognito(&self) -> bool {
+        self.active_tab().is_some_and(|t| t.incognito)
     }
 
     /// Encola una accion para la proxima vuelta del bucle (ver Action).
@@ -438,15 +462,16 @@ impl AppState {
 
     /// Guarda las pestanas abiertas (para "al iniciar: restaurar"). Nunca con
     /// "borrar datos al cerrar": la sesion es justamente lo que no tiene que
-    /// quedar en el disco.
+    /// quedar en el disco. Las de incognito tampoco: no se restauran.
     pub fn save_session(&self) {
         if self.settings.clear_on_exit {
             return;
         }
-        let session = storage::Session {
-            urls: self.tabs.iter().map(|t| t.url.clone()).collect(),
-            active: self.active,
-        };
+        let urls: Vec<String> = self.tabs.iter().filter(|t| !t.incognito).map(|t| t.url.clone()).collect();
+        // Cuantas pestanas normales hay antes de la activa (si la activa es de
+        // incognito, queda la normal que sigue, o la ultima).
+        let before = self.tabs.iter().take(self.active).filter(|t| !t.incognito).count();
+        let session = storage::Session { active: before.min(urls.len().saturating_sub(1)), urls };
         storage::save(storage::SESSION_FILE, &session);
     }
 

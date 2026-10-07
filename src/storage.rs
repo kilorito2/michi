@@ -135,6 +135,8 @@ pub struct Settings {
     /// suggest.rs). Lo escrito se le envia al buscador elegido, como en
     /// Firefox o Chrome; el historial y los marcadores se sugieren igual.
     pub search_suggestions: bool,
+    /// Modo de rendimiento (ver perf.rs): "normal" | "optimized" | "super".
+    pub performance: String,
 }
 
 impl Default for Settings {
@@ -152,6 +154,7 @@ impl Default for Settings {
             clear_on_exit: false,
             blocked_permissions: Vec::new(),
             search_suggestions: true,
+            performance: "normal".into(),
         }
     }
 }

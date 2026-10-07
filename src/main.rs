@@ -16,6 +16,7 @@ mod layout;
 mod menu;
 mod native;
 mod panels;
+mod perf;
 mod permissions;
 mod popup;
 mod protocol;
@@ -126,7 +127,10 @@ impl ApplicationHandler<UserEvent> for App {
             // Al volver con Alt+Tab, wry le da el foco a todos los WebView uno
             // atras de otro y se queda el primero que se creo (a veces una
             // pestana ya oculta): los atajos no andaban hasta hacer clic.
-            WindowEvent::Focused(true) => shortcuts::restore_focus(&self.state),
+            WindowEvent::Focused(true) => {
+                shortcuts::restore_focus(&self.state);
+                perf::refresh_foreground(&self.state);
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 shortcuts::handle_winit_key(&self.state, &event, self.modifiers)
             }
@@ -184,8 +188,8 @@ impl ApplicationHandler<UserEvent> for App {
             let mut st = self.state.borrow_mut();
             (!st.pending_tabs.is_empty()).then(|| st.pending_tabs.remove(0))
         };
-        if let Some(url) = next_tab {
-            tabs::open_tab(&self.state, &url);
+        if let Some((url, incognito)) = next_tab {
+            tabs::open_tab(&self.state, &url, incognito);
             if !self.state.borrow().pending_tabs.is_empty() {
                 self.state.borrow().wake();
             }
@@ -205,7 +209,8 @@ impl ApplicationHandler<UserEvent> for App {
         let menu = menu::watch(&self.state);
         let popup = popup::watch(&self.state);
         let quit = security::quit_deadline(&self.state);
-        match panels.into_iter().chain(menu).chain(popup).chain(https).chain(quit).min() {
+        let perf = perf::tick(&self.state);
+        match panels.into_iter().chain(menu).chain(popup).chain(https).chain(quit).chain(perf).min() {
             Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }
@@ -244,15 +249,15 @@ fn open_startup_tabs(state: &Shared) {
     let session: storage::Session = if restore { storage::load(storage::SESSION_FILE) } else { Default::default() };
     let requested = url_from_args();
     if session.urls.is_empty() {
-        tabs::open_tab(state, requested.as_deref().unwrap_or(HOME_URL));
+        tabs::open_tab(state, requested.as_deref().unwrap_or(HOME_URL), false);
         return;
     }
     for url in &session.urls {
-        tabs::open_tab(state, url);
+        tabs::open_tab(state, url, false);
     }
     // Lo pedido al abrir (un enlace de otra aplicacion) queda al frente.
     if let Some(url) = requested {
-        tabs::open_tab(state, &url);
+        tabs::open_tab(state, &url, false);
         return;
     }
     let last = session.urls.len() - 1;

@@ -30,11 +30,19 @@
   // sobre su ultimo cuadro: cada uno es un decodificador y una composicion
   // mas para la GPU, justo cuando el video de la pagina la necesita.
   var frozen = false;
+  // Modo de rendimiento (ver src/perf.rs): 'normal' | 'optimized' | 'super'.
+  // En 'super' el fondo es una imagen fija (un cuadro del video) y la
+  // interfaz no anima nada: no queda ningun video decodificandose.
+  var perf = 'normal';
+  var lastTheme = null;
 
   var style = document.createElement('style');
   style.textContent =
     '@keyframes __wallpaperZoom { from { transform: scale(1); } to { transform: scale(1.08); } }' +
-    '@media (prefers-reduced-motion: reduce) { .__wallpaper { animation: none !important; } }';
+    '@media (prefers-reduced-motion: reduce) { .__wallpaper { animation: none !important; } }' +
+    'html[data-perf="super"] .__wallpaper { animation: none !important; }' +
+    'html[data-perf="super"] *, html[data-perf="super"] *::before, html[data-perf="super"] *::after {' +
+    ' transition: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }';
   document.head.appendChild(style);
 
   function place(el) {
@@ -123,6 +131,28 @@
     return img;
   }
 
+  // El fondo como imagen fija (modo super): se saca un cuadro del video a un
+  // <canvas> y se suelta el video, que es lo que gasta (decodificador, GPU).
+  // Siempre el mismo instante, para que todas las superficies muestren el
+  // mismo cuadro y el fondo siga siendo uno solo.
+  function makeFrame(src) {
+    var canvas = document.createElement('canvas');
+    var v = document.createElement('video');
+    v.muted = true; v.preload = 'auto'; v.playsInline = true;
+    v.addEventListener('loadedmetadata', function () {
+      v.currentTime = Math.min(1, v.duration / 2);
+    }, { once: true });
+    v.addEventListener('seeked', function () {
+      canvas.width = v.videoWidth;
+      canvas.height = v.videoHeight;
+      canvas.getContext('2d').drawImage(v, 0, 0);
+      v.removeAttribute('src'); v.load();
+      reveal(canvas);
+    }, { once: true });
+    v.src = src;
+    return canvas;
+  }
+
   function makeLayer(theme) {
     var still = STILLS.indexOf(theme) !== -1;
     // Ruta relativa (no 'app://localhost/...'): en Windows, WebView2 sirve
@@ -133,7 +163,7 @@
     // relativa resuelve siempre contra el origen real de la pagina, sea
     // cual sea, y por eso es la unica forma que funciona en toda plataforma.
     var src = '/wallpapers/' + theme + (blur ? '.blur' : '') + (still ? '.jpg' : '.mp4');
-    var el = still ? makeImage(src) : makeVideo(src);
+    var el = still ? makeImage(src) : (perf === 'super' ? makeFrame(src) : makeVideo(src));
     el.className = '__wallpaper';
     el.setAttribute('data-theme', theme);
     el.style.position = 'fixed';
@@ -166,7 +196,22 @@
   }
   window.__setWallpaperFrozen = setFrozen;
 
+  // Rust avisa el modo de rendimiento (ver sync::push_perf). Si cambia entre
+  // video e imagen fija, el fondo se rehace (el nuevo tapa al viejo recien
+  // cuando ya se ve, como al cambiar de tema).
+  window.__setPerf = function (mode) {
+    if (mode === perf) return;
+    var wasFrame = perf === 'super';
+    perf = mode;
+    document.documentElement.setAttribute('data-perf', mode);
+    if ((mode === 'super') !== wasFrame && lastTheme) {
+      discard(incoming);
+      incoming = makeLayer(lastTheme);
+    }
+  };
+
   window.__applyWallpaper = function (theme, winW, winH, offX, offY, freeze) {
+    lastTheme = theme;
     if (freeze !== undefined) setFrozen(freeze);
     box = { w: winW, h: winH, x: offX, y: offY };
     if (current) place(current);

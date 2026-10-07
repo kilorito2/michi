@@ -607,7 +607,11 @@ fn on_new_window(state: &Shared, core: &ICoreWebView2, id: u64) {
             // window.open() devuelve null: nada de ventanas del sistema.
             args.SetHandled(true)?;
         }
-        let opener = s.borrow().tabs.iter().find(|t| t.id == id).map(|t| t.url.clone()).unwrap_or_default();
+        let (opener, incognito) = {
+            let st = s.borrow();
+            let tab = st.tabs.iter().find(|t| t.id == id);
+            (tab.map(|t| t.url.clone()).unwrap_or_default(), tab.is_some_and(|t| t.incognito))
+        };
         if !popup_target_allowed(&uri, &opener) {
             eprintln!("[seguridad] una pagina no puede abrir {uri} en una pestana");
             return Ok(());
@@ -621,10 +625,16 @@ fn on_new_window(state: &Shared, core: &ICoreWebView2, id: u64) {
                     .and_then(|c| unsafe { c.Environment() }.ok());
                 match (environment, unsafe { args.GetDeferral() }) {
                     (Some(environment), Ok(deferral)) => {
-                        st.pending_windows.push(PendingWindow { url: uri, args: args.clone(), deferral, environment });
+                        st.pending_windows.push(PendingWindow {
+                            url: uri,
+                            args: args.clone(),
+                            deferral,
+                            environment,
+                            incognito,
+                        });
                         st.wake();
                     }
-                    _ => st.request_tab(&uri),
+                    _ => st.request_tab_in(&uri, incognito),
                 }
                 false
             } else {
@@ -697,8 +707,9 @@ pub fn open_blocked_popup(state: &Shared) {
         let active = st.active;
         let Some(tab) = st.tabs.get_mut(active) else { return };
         let Some(i) = tab.sec.blocked.iter().rposition(|b| matches!(b, Blocked::Popup(_))) else { return };
+        let incognito = tab.incognito;
         let Blocked::Popup(url) = tab.sec.blocked.remove(i) else { return };
-        st.request_tab(&url);
+        st.request_tab_in(&url, incognito);
     }
     sync::push_active_tab(state);
 }

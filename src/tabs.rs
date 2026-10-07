@@ -24,15 +24,15 @@ pub fn is_bookmarkable(url: &str) -> bool {
     !is_new_tab_url(url) && !url.is_empty()
 }
 
-pub fn open_tab(state: &Shared, url: &str) {
-    let _ = create_tab(state, url, None);
+pub fn open_tab(state: &Shared, url: &str, incognito: bool) {
+    let _ = create_tab(state, url, None, incognito);
 }
 
 /// window.open() de una pagina (ver state::PendingWindow): la pestana nace
 /// sin navegar, en el entorno de la pagina que la abre, y se la entregamos
 /// al motor como la ventana nueva; el motor la lleva a `url`.
 pub fn open_window(state: &Shared, w: PendingWindow) {
-    let core = create_tab(state, &w.url, Some(w.environment));
+    let core = create_tab(state, &w.url, Some(w.environment), w.incognito);
     unsafe {
         // Sin pestana, window.open() devuelve null (como con un bloqueador).
         if let Some(core) = &core {
@@ -45,7 +45,13 @@ pub fn open_window(state: &Shared, w: PendingWindow) {
 
 /// Crea la pestana y la deja al frente. Con `environment` es una ventana de
 /// window.open(): no navega (eso lo hace el motor despues de SetNewWindow).
-fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Environment>) -> Option<ICoreWebView2> {
+/// `incognito`: perfil InPrivate, sin rastro en historial ni sesion.
+fn create_tab(
+    state: &Shared,
+    url: &str,
+    environment: Option<ICoreWebView2Environment>,
+    incognito: bool,
+) -> Option<ICoreWebView2> {
     let id = state.borrow_mut().alloc_id();
     let is_window = environment.is_some();
 
@@ -85,6 +91,9 @@ fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Enviro
             // vuelve a subir la interfaz, tapaba la barra y los paneles — con
             // varios "+" seguidos, la barra "desaparecia" un momento.
             .with_visible(false)
+            // Perfil InPrivate de WebView2: cookies, cache y permisos en
+            // memoria, aparte del perfil normal (ver Tab::incognito).
+            .with_incognito(incognito)
             // F12 / Ctrl+Shift+I y "Herramientas de desarrollador" del menu.
             .with_devtools(true)
             .with_initialization_script(include_str!("../ui/content_init.js"))
@@ -109,8 +118,9 @@ fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Enviro
                         tab.title = title.clone();
                     }
                     // El titulo suele llegar despues de "cargo": se lo
-                    // actualizamos a la entrada de historial recien agregada.
-                    let url = st.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone());
+                    // actualizamos a la entrada de historial recien agregada
+                    // (las de incognito no tienen).
+                    let url = st.tabs.iter().find(|t| t.id == id && !t.incognito).map(|t| t.url.clone());
                     if let (Some(url), Some(last)) = (url, st.history.last_mut()) {
                         if last.url == url && last.title != title {
                             last.title = title;
@@ -123,7 +133,7 @@ fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Enviro
                 sync::push_history(&state_title);
             })
             .with_on_page_load_handler(move |event, page_url| {
-                let (title_snapshot, finished, error_page) = {
+                let (title_snapshot, finished, error_page, incognito) = {
                     let mut st = state_load.borrow_mut();
                     if let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) {
                         tab.url = page_url.clone();
@@ -136,16 +146,18 @@ fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Enviro
                     let tab = st.tabs.iter().find(|t| t.id == id);
                     let title = tab.map(|t| t.title.clone()).unwrap_or_default();
                     let error_page = tab.is_some_and(|t| t.sec.error_page);
-                    (title, matches!(event, PageLoadEvent::Finished), error_page)
+                    (title, matches!(event, PageLoadEvent::Finished), error_page, tab.is_some_and(|t| t.incognito))
                 };
 
                 if finished {
                     let mut st = state_load.borrow_mut();
                     // Ni paginas propias, ni las internas de una extension
                     // (su popup u opciones abiertos en una pestana), ni las
-                    // de error (un sitio que no se pudo abrir).
+                    // de error (un sitio que no se pudo abrir), ni nada de
+                    // lo que se navega en incognito.
                     if !is_new_tab_url(&page_url)
                         && !error_page
+                        && !incognito
                         && !page_url.starts_with("chrome-extension://")
                         && st.history.last().map(|h| &h.url) != Some(&page_url)
                     {
@@ -197,6 +209,8 @@ fn create_tab(state: &Shared, url: &str, environment: Option<ICoreWebView2Enviro
             favicon: None,
             sec: Default::default(),
             playing: Default::default(),
+            incognito,
+            rest: Default::default(),
         });
         st.active = st.tabs.len() - 1;
     }
@@ -282,13 +296,16 @@ fn set_favicon(state: &Shared, id: u64, data_url: Option<String>) {
         match st.tabs.iter_mut().find(|t| t.id == id) {
             Some(tab) if tab.favicon != data_url => {
                 tab.favicon = data_url.clone();
-                Some(tab.url.clone())
+                Some((tab.url.clone(), tab.incognito))
             }
             _ => None,
         }
     };
-    if let Some(url) = changed {
-        crate::suggest::remember_favicon(state, &url, &data_url);
+    if let Some((url, incognito)) = changed {
+        // Recordar el logo de un sitio dice que se lo visito: en incognito no.
+        if !incognito {
+            crate::suggest::remember_favicon(state, &url, &data_url);
+        }
         sync::push_tabs(state);
     }
 }
@@ -312,6 +329,8 @@ pub fn activated(state: &Shared) {
     sync::push_wallpaper(state);
     sync::push_own_pages(state);
     state.borrow().save_session();
+    // Las que quedan atras descansan segun el modo de rendimiento.
+    crate::perf::on_activated(state);
 }
 
 pub fn close_tab(state: &Shared, id: u64) {
@@ -321,7 +340,8 @@ pub fn close_tab(state: &Shared, id: u64) {
         let Some(i) = st.tabs.iter().position(|t| t.id == id) else { return };
         let was_active = st.active;
         let closed = st.tabs.remove(i);
-        if !is_new_tab_url(&closed.url) {
+        // Una de incognito no se puede reabrir: seria un rastro de lo que se vio.
+        if !is_new_tab_url(&closed.url) && !closed.incognito {
             st.closed_tabs.push(closed.url.clone());
             let excess = st.closed_tabs.len().saturating_sub(25);
             st.closed_tabs.drain(..excess);

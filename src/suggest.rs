@@ -592,7 +592,8 @@ fn local_matches(st: &AppState, visits: &[Visit], query: &str, skip: &HashSet<St
         }
     }
     for (i, t) in st.tabs.iter().enumerate() {
-        if i != st.active && is_web(&t.url) {
+        // Las de incognito solo se sugieren desde otra de incognito.
+        if i != st.active && is_web(&t.url) && (!t.incognito || st.active_is_incognito()) {
             add(Kind::Tab, &t.url, &t.title, 3.0, Some(t.id));
         }
     }

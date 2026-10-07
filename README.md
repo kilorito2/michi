@@ -7,7 +7,7 @@
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-2021-CE422B?style=for-the-badge&logo=rust&logoColor=white)
 ![WebView2](https://img.shields.io/badge/Motor-WebView2%20(Chromium)-0A7CFF?style=for-the-badge&logo=microsoftedge&logoColor=white)
-![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.4-ff7a1a?style=for-the-badge)
+![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.5-ff7a1a?style=for-the-badge)
 ![Licencia MIT](https://img.shields.io/badge/licencia-MIT-8b7bff?style=for-the-badge)
 
 ### [Descargar el instalador](https://github.com/kilorito2/michi/releases/latest)
@@ -123,6 +123,41 @@ YouTube...), los fondos de la barra y los paneles **se congelan** en su último
 cuadro y se reanudan solos al terminar: cada fondo es un decodificador de video
 y una composición más, y la GPU hace falta para el video de la página.
 
+### <img src="docs/icons/incognito.svg" width="22" height="22" alt=""> Pestañas de incógnito
+
+<kbd>Ctrl</kbd> + <kbd>Mayús</kbd> + <kbd>N</kbd>, o **⋮ › Pestaña de incógnito**
+(y un botón en **Ajustes › Privacidad**). Es una pestaña más del panel, pero con
+un **perfil aparte que vive solo en memoria** (el modo InPrivate de WebView2):
+sus cookies, caché, almacenamiento de sitios y permisos no se mezclan con los de
+las pestañas normales, y desaparecen cuando se cierran todas las de incógnito.
+
+- La barra se tiñe de violeta y muestra una etiqueta **Incógnito**; en el panel
+  de pestañas llevan un fantasma.
+- No dejan **historial**, ni logos de sitios para las sugerencias, ni se guardan
+  en la **sesión** (no se restauran al iniciar) ni se pueden **reabrir** con
+  <kbd>Ctrl</kbd> + <kbd>Mayús</kbd> + <kbd>T</kbd>.
+- Lo que se abre desde una pestaña de incógnito (enlaces, ventanas emergentes) también es de
+  incógnito. Sus pestañas solo se sugieren en la barra de direcciones desde otra de incógnito.
+- Las descargas y los marcadores que guardes **se conservan**, y tu proveedor de
+  internet y los sitios que visitas igual ven lo que haces: incógnito no es anonimato.
+
+### <img src="docs/icons/rendimiento.svg" width="22" height="22" alt=""> Modos de rendimiento
+
+En **Ajustes › Rendimiento**; se aplican en el momento, sin reiniciar.
+
+| Modo | Qué hace |
+| --- | --- |
+| **Normal** | Todo como siempre. |
+| **Optimizado** | El fondo animado se **pausa cuando Michi no está en primer plano** (otra ventana al frente, o minimizado). Las pestañas de atrás piden usar menos memoria y, a los **10 minutos** sin usarlas, se **duermen**. |
+| **Super optimizado** | El fondo pasa a ser una **imagen fija** (un cuadro del video: no se decodifica ningún video), la interfaz **no anima nada** (sin transiciones ni desenfoque, y los paneles se abren de golpe). Las pestañas de atrás usan la menor memoria posible y se duermen a los **2 minutos**. |
+
+Una pestaña dormida (`TrySuspend` de WebView2) no ejecuta su página: se pausan sus
+temporizadores y conexiones, así que un chat o un correo abierto de fondo no avisa
+de lo nuevo hasta que vuelvas a ella (al volver se reanuda sola). No se duermen las
+pestañas que reproducen sonido o video, las que están cargando, las páginas propias
+de Michi ni la que está en pantalla completa. Los modos viven en `src/perf.rs` y
+`ui/wallpaper.js`.
+
 ### <img src="docs/icons/importar.svg" width="22" height="22" alt=""> Importar de otro navegador
 
 En **Ajustes › Importar**, Michi detecta los navegadores instalados en la PC y
@@ -169,6 +204,7 @@ estás viendo.
 | Nueva pestaña | <kbd>Ctrl</kbd> + <kbd>T</kbd> |
 | Cerrar pestaña | <kbd>Ctrl</kbd> + <kbd>W</kbd> |
 | Reabrir pestaña cerrada | <kbd>Ctrl</kbd> + <kbd>Mayús</kbd> + <kbd>T</kbd> |
+| Pestaña de incógnito | <kbd>Ctrl</kbd> + <kbd>Mayús</kbd> + <kbd>N</kbd> |
 | Ir a la pestaña 1 a 8 / a la última | <kbd>Ctrl</kbd> + <kbd>1</kbd> … <kbd>8</kbd> / <kbd>Ctrl</kbd> + <kbd>9</kbd> |
 | Pestaña siguiente / anterior | <kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>Mayús</kbd> + <kbd>Tab</kbd> |
 | Ir a la barra de direcciones | <kbd>Ctrl</kbd> + <kbd>L</kbd> o <kbd>Alt</kbd> + <kbd>D</kbd> |
@@ -187,8 +223,8 @@ estás viendo.
 - **Ajustes** (`app://localhost/settings`, desde el menú **⋮**): buscador
   predeterminado (Google, Bing, DuckDuckGo, Brave, Ecosia) y sus sugerencias, al iniciar (pestaña
   nueva o restaurar la sesión), fondo, zoom predeterminado, carpeta de
-  descargas, privacidad y seguridad, extensiones.
-- **Menú ⋮**: nueva pestaña, reabrir cerrada, zoom, marcador, imprimir,
+  descargas, privacidad y seguridad (con incógnito), rendimiento, extensiones.
+- **Menú ⋮**: nueva pestaña, pestaña de incógnito, reabrir cerrada, zoom, marcador, imprimir,
   herramientas de desarrollador, extensiones, ajustes, acerca de, salir.
 - **Michi predeterminado**: puede abrir los enlaces y archivos `.html` de
   otras aplicaciones (lo registra el instalador). Si Michi ya está abierto, lo
@@ -355,7 +391,7 @@ Michi tiene su propio instalador, hecho con la misma base que el navegador
 y con su misma estética: el **fondo animado detrás del vidrio** (que cambia en
 vivo al elegir otro), el zorro y los colores de su degradado.
 
-**Descarga:** `Michi-Setup-0.1.4.exe` en
+**Descarga:** `Michi-Setup-0.1.5.exe` en
 [Releases](https://github.com/kilorito2/michi/releases/latest). No está firmado
 digitalmente, así que Windows puede mostrar el aviso de SmartScreen la primera
 vez: *Más información › Ejecutar de todas formas*.
@@ -531,6 +567,7 @@ src/
   audio.rs        nombre e icono de Michi en el mezclador de volumen
   security.rs     medidas de seguridad
   permissions.rs  permisos de los sitios
+  perf.rs         modos de rendimiento: pestañas dormidas, memoria, primer plano
   win.rs          maximizar sin tapar la barra de tareas
   single_instance.rs  un solo Michi: los enlaces/archivos van al que ya está abierto
   native.rs       API de WebView2 que wry no expone
@@ -673,6 +710,12 @@ respondía a CSS, así que se optó por un color sólido.
   seguir mostrando `msedgewebview2` si identifican el sonido por el nombre del
   proceso en vez del nombre de la sesión de audio. El mezclador de Windows
   muestra "Michi".
+- **Incógnito es una pestaña, no una ventana aparte**: comparte la ventana con las normales
+  (se distingue por el color y el fantasma), y <kbd>Ctrl</kbd> + <kbd>T</kbd> o el botón **+** abren siempre una pestaña
+  normal, incluso desde una de incógnito. Las extensiones pueden no funcionar en ellas:
+  WebView2 las trata aparte en el perfil InPrivate.
+- **El modo Optimizado pausa el fondo con Michi fuera de primer plano**, aunque
+  la ventana siga visible al lado de otra aplicación.
 - El efecto vidrio difumina el fondo animado, no los píxeles de la página de
   atrás: WebView2 no permite mezclar el contenido de dos WebViews.
 
@@ -683,7 +726,8 @@ respondía a CSS, así que se optó por un color sólido.
 ## <img src="docs/icons/hoja-de-ruta.svg" width="26" height="26" alt=""> Hoja de ruta
 
 - [ ] Carpetas y edición de marcadores; buscar en el historial.
-- [ ] Modo incógnito (un WebView con `with_incognito`).
+- [x] Modo incógnito (pestañas con perfil InPrivate de WebView2).
+- [x] Modos de rendimiento: optimizado y super optimizado.
 - [ ] Reordenar pestañas arrastrándolas en el panel.
 - [x] Una sola instancia: los enlaces de otras aplicaciones abren una pestaña en la ventana abierta.
 - [x] Sugerencias en la barra de direcciones.

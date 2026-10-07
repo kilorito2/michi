@@ -47,6 +47,31 @@ pub fn bring_to_front() {
 #[cfg(not(windows))]
 pub fn bring_to_front() {}
 
+/// Michi esta en primer plano: la ventana al frente es una de este proceso (la
+/// principal, o un dialogo suyo) y la principal no esta minimizada. Las
+/// ventanas de WebView2 son hijas de la principal (y de otro proceso), asi que
+/// el foco del teclado dentro de una pagina no cuenta: lo que se mira es la
+/// ventana de primer nivel.
+#[cfg(windows)]
+pub fn is_foreground() -> bool {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, IsIconic};
+    let main = MAIN_WINDOW.load(Ordering::Relaxed) as windows_sys::Win32::Foundation::HWND;
+    unsafe {
+        if main.is_null() || IsIconic(main) != 0 {
+            return false;
+        }
+        let front = GetForegroundWindow();
+        let mut pid = 0u32;
+        !front.is_null() && GetWindowThreadProcessId(front, &mut pid) != 0 && pid == GetCurrentProcessId()
+    }
+}
+
+#[cfg(not(windows))]
+pub fn is_foreground() -> bool {
+    true
+}
+
 /// La ventana principal como "duena" de un dialogo (`set_parent` de rfd),
 /// usable desde cualquier hilo. Los dialogos se abren en otros hilos para no
 /// trabar el bucle de eventos, y sin duena Windows podia dejarlos DETRAS del

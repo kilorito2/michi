@@ -41,8 +41,23 @@
     position: relative;
     z-index: 2;
     width: 100%; height: 100%;
-    display: flex; align-items: center; justify-content: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px;
   }
+
+  /* Pestana de incognito (lo avisa Rust, ver window.onIncognito). */
+  .incog-note {
+    width: min(560px, 86vw); padding: 18px 22px; border-radius: 16px; text-align: center;
+    background: rgba(40,24,70,0.62); border: 1px solid rgba(176,140,255,0.4);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+  }
+  .incog-note[hidden] { display: none; }
+  .incog-note h2 {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    margin: 0 0 8px; font-size: 16px; font-weight: 600; color: #e4d7ff;
+  }
+  .incog-note h2 svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .incog-note p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+  body.incognito .search-wrap:focus-within { border-color: #b08cff; }
 
   .search-wrap {
     display: flex; align-items: center; gap: 12px;
@@ -105,6 +120,10 @@
       </svg>
       <input id="q" spellcheck="false" autofocus placeholder="Buscar o escribir una direccion" />
     </div>
+    <div class="incog-note" id="incog-note" hidden>
+      <h2><svg viewBox="0 0 24 24"><path d="M5 21V11a7 7 0 0 1 14 0v10l-2.4-2-2.3 2-2.3-2-2.3 2L7.4 19z"/><circle cx="9.6" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg>Estas navegando en incognito</h2>
+      <p>Michi no guardara el historial, las cookies ni los datos de los sitios que visites en esta pestana: se borran al cerrarla. Las descargas y los marcadores que guardes si se conservan. Tu proveedor de internet y los sitios que visitas igual pueden ver lo que haces.</p>
+    </div>
   </div>
 
   <div id="themes"></div>
@@ -151,6 +170,12 @@
   window.onWallpaperTheme = function (theme) {
     activeTheme = theme;
     markActive();
+  };
+
+  // Pestana de incognito: lo avisa Rust al cargar la pagina.
+  window.onIncognito = function (on) {
+    document.body.classList.toggle('incognito', !!on);
+    document.getElementById('incog-note').hidden = !on;
   };
 
   input.addEventListener('keydown', function (e) {

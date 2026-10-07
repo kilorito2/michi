@@ -88,7 +88,10 @@ fn open(state: &Shared, id: String, right: f64) {
             // data: ni paginas internas.
             let mut st = s_new.borrow_mut();
             if url.starts_with("chrome-extension://") || security::popup_target_allowed(&url, "") {
-                st.request_tab(&url);
+                // El popup actua sobre la pestana al frente: si es de incognito,
+                // lo que abre tambien.
+                let incognito = st.active_is_incognito();
+                st.request_tab_in(&url, incognito);
             }
             st.request(Action::ClosePopup);
             NewWindowResponse::Deny

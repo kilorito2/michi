@@ -31,6 +31,8 @@ use crate::{layout, sync};
 /// parcial (animacion interrumpida) dura proporcionalmente menos.
 const OPEN_MS: f64 = 300.0;
 const CLOSE_MS: f64 = 230.0;
+/// Lo mismo en el modo Super optimizado: un solo cuadro.
+const INSTANT_MS: f64 = 10.0;
 /// Cuanto tiempo tiene que estar el cursor fuera de un panel abierto para
 /// cerrarlo. Evita cierres por un roce del cursor con el borde.
 const LEAVE_GRACE: Duration = Duration::from_millis(200);
@@ -50,6 +52,7 @@ pub fn set_expanded(state: &Shared, side: Side, value: bool) {
         // Con un video en pantalla completa los paneles van ocultos, y un
         // atajo (Ctrl+H) o una descarga no los abre igual por encima.
         let value = value && !crate::fullscreen::is_active(&st);
+        let instant = crate::perf::mode(&st).instant_panels();
         let p = st.panel_mut(side);
         p.outside_since = None;
         if !value {
@@ -60,7 +63,8 @@ pub fn set_expanded(state: &Shared, side: Side, value: bool) {
         } else {
             p.expanded = value;
             let to = if value { 1.0 } else { 0.0 };
-            let full_ms = if value { OPEN_MS } else { CLOSE_MS };
+            // Super optimizado: de golpe, sin animar (ver perf::Mode).
+            let full_ms = if instant { INSTANT_MS } else if value { OPEN_MS } else { CLOSE_MS };
             let remaining = (to - p.progress).abs();
             p.anim = Some(PanelAnim {
                 from: p.progress,

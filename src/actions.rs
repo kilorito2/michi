@@ -40,7 +40,7 @@ fn run(state: &Shared, action: Action) {
         Action::ReopenClosedTab => {
             let url = state.borrow_mut().closed_tabs.pop();
             if let Some(url) = url {
-                tabs::open_tab(state, &url);
+                tabs::open_tab(state, &url, false);
             }
         }
         Action::CycleTab(delta) => {
@@ -165,7 +165,7 @@ fn open_settings(state: &Shared, section: &str) {
         }
         None => {
             let url = if section.is_empty() { SETTINGS_URL.to_string() } else { format!("{SETTINGS_URL}#{section}") };
-            tabs::open_tab(state, &url);
+            tabs::open_tab(state, &url, false);
         }
     }
     layout::relayout(state);

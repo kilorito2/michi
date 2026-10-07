@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use crate::state::{
     is_own_page, own_page_path, Shared, Side, EDGE_IDLE, MIN_WINDOW_H, MIN_WINDOW_W, PANEL_W, TOPBAR_H,
 };
-use crate::{extensions, menu, native, permissions, protocol, security, storage, tabs};
+use crate::{extensions, menu, native, perf, permissions, protocol, security, storage, tabs};
 
 pub fn push_tabs(state: &Shared) {
     let st = state.borrow();
@@ -24,6 +24,7 @@ pub fn push_tabs(state: &Shared) {
                 "url": t.url,
                 "active": i == st.active,
                 "favicon": t.favicon,
+                "incognito": t.incognito,
             })
         })
         .collect();
@@ -53,6 +54,8 @@ pub fn push_active_tab(state: &Shared) {
     let data = json!({
         "title": tab.title,
         "url": url,
+        // Pestana de incognito: la barra se tine y lo avisa.
+        "incognito": tab.incognito,
         // Lo que muestra la barra a la izquierda de la direccion; "internal"
         // = nuestras paginas (la barra queda vacia, como en la pestana nueva).
         "security": security,
@@ -153,7 +156,9 @@ pub fn push_wallpaper(state: &Shared) {
 pub fn push_media(state: &Shared) {
     let frozen = {
         let mut st = state.borrow_mut();
-        let frozen = st.tabs.get(st.active).is_some_and(|t| t.playing.any());
+        // Reproduciendo algo al frente, o (con un modo de rendimiento) Michi
+        // fuera de primer plano.
+        let frozen = st.tabs.get(st.active).is_some_and(|t| t.playing.any()) || perf::freeze_wallpaper(&st);
         if frozen == st.wallpaper_frozen {
             return;
         }
@@ -164,6 +169,29 @@ pub fn push_media(state: &Shared) {
     let js = format!("window.__setWallpaperFrozen && window.__setWallpaperFrozen({frozen})");
     for view in [&st.topbar, &st.left_panel, &st.right_panel, &st.menu, &st.suggest.view].into_iter().flatten() {
         let _ = view.evaluate_script(&js);
+    }
+}
+
+/// Le dice a cada pagina propia (la interfaz y las pestanas que muestran una
+/// pagina nuestra) en que modo de rendimiento esta: el fondo fijo y las
+/// animaciones los resuelve ella (ver ui/wallpaper.js, window.__setPerf).
+pub fn push_perf(state: &Shared) {
+    let st = state.borrow();
+    let js = format!("window.__setPerf && window.__setPerf('{}')", perf::mode(&st).id());
+    for view in [&st.topbar, &st.left_panel, &st.right_panel, &st.menu, &st.suggest.view].into_iter().flatten() {
+        let _ = view.evaluate_script(&js);
+    }
+    for tab in st.tabs.iter().filter(|t| is_own_page(&t.url)) {
+        let _ = tab.webview.evaluate_script(&js);
+    }
+}
+
+/// La pagina propia de esa pestana (la pestana nueva) se entera de que es de
+/// incognito, para decirlo.
+pub fn push_incognito(state: &Shared, tab_id: u64) {
+    let st = state.borrow();
+    if let Some(tab) = st.tabs.iter().find(|t| t.id == tab_id && t.incognito && is_own_page(&t.url)) {
+        let _ = tab.webview.evaluate_script("window.onIncognito && window.onIncognito(true)");
     }
 }
 
