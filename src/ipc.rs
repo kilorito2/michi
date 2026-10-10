@@ -467,6 +467,7 @@ fn set_setting(state: &Shared, key: &str, value: Value) {
             }
             ("clearOnExit", Value::Bool(v)) => s.clear_on_exit = *v,
             ("searchSuggestions", Value::Bool(v)) => s.search_suggestions = *v,
+            ("allowAssistant", Value::Bool(v)) => s.allow_assistant = *v,
             ("performance", Value::String(v)) if perf::IDS.contains(&v.as_str()) => s.performance = v.clone(),
             ("downloadsDir", Value::Null) => s.downloads_dir = None,
             _ => {

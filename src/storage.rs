@@ -137,6 +137,9 @@ pub struct Settings {
     pub search_suggestions: bool,
     /// Modo de rendimiento (ver perf.rs): "normal" | "optimized" | "super".
     pub performance: String,
+    /// Dejar que May (la asistente de voz) controle Michi por el pipe de
+    /// control: pestanas, navegacion y la pagina (ver control.rs).
+    pub allow_assistant: bool,
 }
 
 impl Default for Settings {
@@ -155,6 +158,7 @@ impl Default for Settings {
             blocked_permissions: Vec::new(),
             search_suggestions: true,
             performance: "normal".into(),
+            allow_assistant: true,
         }
     }
 }

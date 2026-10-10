@@ -6,6 +6,7 @@
 mod actions;
 mod audio;
 mod chrome;
+mod control;
 mod crx;
 mod downloads;
 mod extensions;
@@ -160,6 +161,7 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::ImportReady(data) => import::apply(&self.state, *data),
             UserEvent::ImportFailed(message) => sync::push_toast(&self.state, &message),
             UserEvent::SearchSuggestions { seq, query, list } => suggest::on_engine(&self.state, seq, query, list),
+            UserEvent::Control(request) => control::handle(&self.state, request),
             UserEvent::OpenExternal(url) => {
                 win::bring_to_front();
                 if let Some(url) = url.filter(|u| single_instance::is_external_target(u)) {
@@ -330,6 +332,7 @@ fn main() {
         .build()
         .expect("no se pudo crear el event loop");
     single_instance::listen(event_loop.create_proxy());
+    control::listen(event_loop.create_proxy());
     let mut app = App::new(event_loop.create_proxy());
     event_loop.run_app(&mut app).expect("fallo el bucle de eventos");
 }

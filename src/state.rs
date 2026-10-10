@@ -138,6 +138,9 @@ pub enum UserEvent {
     OpenExternal(Option<String>),
     /// Sugerencias del buscador para lo escrito en la barra (ver suggest.rs).
     SearchSuggestions { seq: u64, query: String, list: Vec<String> },
+    /// Un pedido de May (u otra app del usuario) por el pipe de control: se
+    /// resuelve aca, en el hilo de la interfaz (ver control.rs).
+    Control(crate::control::Request),
 }
 
 /// Algo que hay que hacer en la proxima vuelta del bucle de eventos (ver

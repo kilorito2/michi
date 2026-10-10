@@ -7,7 +7,7 @@
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-2021-CE422B?style=for-the-badge&logo=rust&logoColor=white)
 ![WebView2](https://img.shields.io/badge/Motor-WebView2%20(Chromium)-0A7CFF?style=for-the-badge&logo=microsoftedge&logoColor=white)
-![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.5-ff7a1a?style=for-the-badge)
+![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.6-ff7a1a?style=for-the-badge)
 ![Licencia MIT](https://img.shields.io/badge/licencia-MIT-8b7bff?style=for-the-badge)
 
 ### [Descargar el instalador](https://github.com/kilorito2/michi/releases/latest)
@@ -230,6 +230,11 @@ estás viendo.
   otras aplicaciones (lo registra el instalador). Si Michi ya está abierto, lo
   pedido se abre en **una pestaña nueva de esa misma ventana**, que pasa al
   frente: nunca un segundo navegador.
+- **Lo controla May**: May, la asistente de voz del mismo autor, usa Michi
+  como su navegador. Por un pipe local (nunca desde la red) puede listar,
+  abrir, cambiar y cerrar pestañas, leer la página, hacer clic, escribir y
+  sacar capturas, con los comandos DevTools de cada pestaña y sin abrir un
+  puerto de depuración. Se apaga en Ajustes > Privacidad y seguridad.
 - **Sonido con nombre**: en el mezclador de volumen de Windows, el sonido de las
   páginas aparece como **Michi**, con su icono. Lo reproduce un proceso de
   WebView2 (`msedgewebview2.exe`), y Michi le pone su nombre a esa sesión de
@@ -391,7 +396,7 @@ Michi tiene su propio instalador, hecho con la misma base que el navegador
 y con su misma estética: el **fondo animado detrás del vidrio** (que cambia en
 vivo al elegir otro), el zorro y los colores de su degradado.
 
-**Descarga:** `Michi-Setup-0.1.5.exe` en
+**Descarga:** `Michi-Setup-0.1.6.exe` en
 [Releases](https://github.com/kilorito2/michi/releases/latest). No está firmado
 digitalmente, así que Windows puede mostrar el aviso de SmartScreen la primera
 vez: *Más información › Ejecutar de todas formas*.
@@ -557,6 +562,7 @@ src/
   layout.rs       posición y tamaño de cada WebView
   panels.rs       apertura/cierre animado de los paneles + vigilante del cursor
   actions.rs      acciones diferidas (atajos, menú) fuera de los callbacks
+  control.rs      pipe de control para May: pestañas, navegación y comandos CDP
   shortcuts.rs    atajos de teclado (AcceleratorKeyPressed de WebView2)
   extensions.rs   instalar/listar/activar/quitar extensiones
   crx.rs          verificar la firma de los paquetes .crx (CRX3)

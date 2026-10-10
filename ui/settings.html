@@ -295,6 +295,13 @@
             <option value="off">Desactivado</option>
           </select>
         </div>
+        <div class="row">
+          <div class="text">
+            <div class="title">Permitir que May controle Michi</div>
+            <div class="desc">May, la asistente de voz, puede abrir, cambiar y cerrar pestanas, leer las paginas, hacer clic y escribir en ellas, como si fueras vos. Solo desde esta PC.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="allow-assistant" aria-label="Permitir que May controle Michi" /><span class="track"></span></label>
+        </div>
       </div>
 
       <h3>Privacidad</h3>
@@ -524,6 +531,7 @@
   $('incog-open').addEventListener('click', function () { ipc('new_incognito_tab'); });
   $('block-popups').addEventListener('change', function () { set('blockPopups', this.checked); });
   $('smartscreen').addEventListener('change', function () { set('smartscreen', this.checked); });
+  $('allow-assistant').addEventListener('change', function () { set('allowAssistant', this.checked); });
   $('https-mode').addEventListener('change', function () { set('httpsMode', this.value); });
   $('tracking').addEventListener('change', function () { set('trackingPrevention', this.value); });
   $('clear-on-exit').addEventListener('change', function () { set('clearOnExit', this.checked); });
@@ -561,6 +569,7 @@
     document.querySelectorAll('input[name=perf]').forEach(function (r) { r.checked = r.value === s.performance; });
     $('block-popups').checked = s.blockPopups;
     $('smartscreen').checked = s.smartscreen;
+    $('allow-assistant').checked = s.allowAssistant;
     $('smartscreen-off').hidden = !d.smartscreenOffInWindows;
     $('https-mode').value = s.httpsMode;
     $('tracking').value = s.trackingPrevention;

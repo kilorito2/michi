@@ -47,6 +47,37 @@ pub fn bring_to_front() {
 #[cfg(not(windows))]
 pub fn bring_to_front() {}
 
+/// Trae la ventana al frente aunque Michi no tenga permiso para hacerlo (un
+/// pedido de May llega sin que el usuario haya tocado Michi, y Windows le
+/// niega SetForegroundWindow a un proceso que no recibio la ultima entrada).
+/// Apretar y soltar Alt "por" el usuario levanta esa traba: es lo que hace
+/// Windows con Alt+Tab.
+#[cfg(windows)]
+pub fn force_to_front() {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{keybd_event, KEYEVENTF_KEYUP, VK_MENU};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
+    };
+    let hwnd = MAIN_WINDOW.load(Ordering::Relaxed) as windows_sys::Win32::Foundation::HWND;
+    if hwnd.is_null() {
+        return;
+    }
+    unsafe {
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        if SetForegroundWindow(hwnd) == 0 {
+            keybd_event(VK_MENU as u8, 0, 0, 0);
+            keybd_event(VK_MENU as u8, 0, KEYEVENTF_KEYUP, 0);
+            SetForegroundWindow(hwnd);
+        }
+        BringWindowToTop(hwnd);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn force_to_front() {}
+
 /// Michi esta en primer plano: la ventana al frente es una de este proceso (la
 /// principal, o un dialogo suyo) y la principal no esta minimizada. Las
 /// ventanas de WebView2 son hijas de la principal (y de otro proceso), asi que

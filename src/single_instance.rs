@@ -35,7 +35,7 @@ fn wide(s: &str) -> Vec<u16> {
 }
 
 /// Identificador de esta instalacion: hash de la ruta del .exe.
-fn install_id() -> u64 {
+pub fn install_id() -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     std::env::current_exe()
         .map(|p| p.to_string_lossy().to_lowercase())
