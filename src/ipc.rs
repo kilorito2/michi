@@ -69,6 +69,18 @@ pub enum Command {
     NewTabInGroup { group: u64 },
     /// Se esta escribiendo en el panel de pestanas (el nombre de un grupo).
     EditingRight { value: bool },
+    /// Barra: respuesta a "Guardar la contrasena?" ("save" | "never" |
+    /// "dismiss") y la llave (ver passwords.rs).
+    PasswordAnswer { choice: String },
+    PasswordMenu,
+    /// Ajustes > Contrasenas.
+    PasswordsList,
+    PasswordReveal { id: u64 },
+    PasswordCopy { id: u64 },
+    PasswordEdit { id: u64, username: String, password: String },
+    PasswordAdd { site: String, username: String, password: String },
+    PasswordDelete { id: u64 },
+    PasswordForgetNever { origin: String },
     DragWindow,
     Minimize,
     ToggleMaximize,
@@ -234,6 +246,8 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
             }
         }
         Command::EditingRight { value } => panels::set_editing(state, Side::Right, value),
+        Command::PasswordAnswer { choice } => crate::passwords::answer(state, &choice),
+        Command::PasswordMenu => crate::passwords::fill_menu(state),
         Command::PinTab { id, pinned } => tabs::set_pinned(state, id, pinned),
         Command::MuteTab { id, muted } => tabs::set_muted(state, id, muted),
         Command::DuplicateTab { id } => tabs::duplicate(state, id),
@@ -366,6 +380,12 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
         set_video_playing(state, tab_id, flag == "1");
         return;
     }
+    // Y que se envio un formulario con contrasena (para ofrecer guardarla en
+    // el sitio de `source`, nunca en otro; ver passwords.rs).
+    if let Some(captured) = raw.strip_prefix("michi:pw:") {
+        crate::passwords::on_captured(state, tab_id, source, captured);
+        return;
+    }
     let Some(page) = own_page_path(source) else { return };
     let trusted = state
         .borrow()
@@ -387,6 +407,7 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
             sync::push_incognito(state, tab_id);
             match page {
                 "/settings" => {
+                    crate::passwords::push_list(state);
                     extensions::refresh(state);
                     sync::push_extension_status(state);
                     permissions::push_site_permissions(state);
@@ -418,7 +439,14 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
             | Command::ImportRun { .. }
             | Command::ClearSiteZoom
             | Command::UpdateCheck
-            | Command::UpdateInstall),
+            | Command::UpdateInstall
+            | Command::PasswordsList
+            | Command::PasswordReveal { .. }
+            | Command::PasswordCopy { .. }
+            | Command::PasswordEdit { .. }
+            | Command::PasswordAdd { .. }
+            | Command::PasswordDelete { .. }
+            | Command::PasswordForgetNever { .. }),
         ) => handle_page_command(state, cmd),
         ("/insecure", Command::InsecureProceed) => security::proceed_insecure(state, tab_id),
         ("/insecure", Command::InsecureBack) => {
@@ -486,6 +514,9 @@ fn handle_page_command(state: &Shared, cmd: Command) {
             if history {
                 library::clear_history(state);
             }
+            if passwords {
+                crate::passwords::clear_all(state);
+            }
             if downloads {
                 state.borrow_mut().downloads.retain(|d| d.status == "downloading" || d.status == "paused");
             }
@@ -528,6 +559,15 @@ fn handle_page_command(state: &Shared, cmd: Command) {
             sync::push_toast(state, "Se olvidó el zoom de los sitios");
         }
         Command::UpdateCheck => crate::update::start_check(state, true),
+        Command::PasswordsList => crate::passwords::push_list(state),
+        Command::PasswordReveal { id } => crate::passwords::request(state, crate::passwords::Pending::Reveal(id)),
+        Command::PasswordCopy { id } => crate::passwords::request(state, crate::passwords::Pending::Copy(id)),
+        Command::PasswordEdit { id, username, password } => {
+            crate::passwords::request(state, crate::passwords::Pending::Edit { id, username, password })
+        }
+        Command::PasswordAdd { site, username, password } => crate::passwords::add(state, &site, &username, &password),
+        Command::PasswordDelete { id } => crate::passwords::delete(state, id),
+        Command::PasswordForgetNever { origin } => crate::passwords::forget_never(state, &origin),
         Command::UpdateInstall => crate::update::install(state),
         _ => {}
     }

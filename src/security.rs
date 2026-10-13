@@ -265,16 +265,18 @@ pub fn apply_smartscreen(state: &Shared) {
 /// cada WebView: se aplica a cada pestana al crearla y a todas al cambiarlo.
 /// WebView2 trae las dos cosas (el globo de "Guardar contrasena?" y las
 /// sugerencias al escribir) y las guarda en el perfil, cifradas por Windows.
+///
+/// Las contrasenas las guarda Michi (ver passwords.rs), asi que el guardado
+/// de WebView2 queda siempre apagado: si no, preguntarian los dos.
 fn set_autofill(state: &Shared, webview: &WebView) {
-    let st = state.borrow();
-    set_autofill_on(webview, st.settings.save_passwords, st.settings.autofill);
+    set_autofill_on(webview, state.borrow().settings.autofill);
 }
 
-fn set_autofill_on(webview: &WebView, passwords: bool, autofill: bool) {
+fn set_autofill_on(webview: &WebView, autofill: bool) {
     let settings4 = unsafe { webview.webview().Settings() }.and_then(|s| s.cast::<ICoreWebView2Settings4>());
     if let Ok(s4) = settings4 {
         unsafe {
-            let _ = s4.SetIsPasswordAutosaveEnabled(passwords);
+            let _ = s4.SetIsPasswordAutosaveEnabled(false);
             let _ = s4.SetIsGeneralAutofillEnabled(autofill);
         }
     }
@@ -283,7 +285,7 @@ fn set_autofill_on(webview: &WebView, passwords: bool, autofill: bool) {
 pub fn apply_autofill(state: &Shared) {
     let st = state.borrow();
     for tab in &st.tabs {
-        set_autofill_on(&tab.webview, st.settings.save_passwords, st.settings.autofill);
+        set_autofill_on(&tab.webview, st.settings.autofill);
     }
 }
 

@@ -17,6 +17,11 @@ use winit::raw_window_handle::{
 /// HWND de la ventana principal (0 = todavia no hay). Ver Owner.
 static MAIN_WINDOW: AtomicIsize = AtomicIsize::new(0);
 
+/// La ventana principal (null si todavia no existe).
+pub fn main_hwnd() -> windows_sys::Win32::Foundation::HWND {
+    MAIN_WINDOW.load(Ordering::Relaxed) as windows_sys::Win32::Foundation::HWND
+}
+
 pub fn remember_main_window(window: &winit::window::Window) {
     if let Ok(handle) = window.window_handle() {
         if let RawWindowHandle::Win32(h) = handle.as_raw() {

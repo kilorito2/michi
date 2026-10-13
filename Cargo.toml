@@ -42,16 +42,18 @@ base64 = "0.22"
 # Pipes/FileSystem/Security: un solo Michi abierto (ver src/single_instance.rs).
 # ToolHelp: los procesos de WebView2 de Michi, para su sonido (src/audio.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_SystemServices", "Win32_System_Registry", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO", "Win32_System_Diagnostics_ToolHelp"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_SystemServices", "Win32_System_Registry", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO", "Win32_System_Diagnostics_ToolHelp", "Win32_Security_Cryptography", "Win32_System_DataExchange", "Win32_System_Memory"] }
 # API de WebView2 que wry no expone: extensiones (ICoreWebView2Profile7),
 # atajos de teclado (AcceleratorKeyPressed), borrar datos por tipo. Mismas
 # versiones que ya usa wry por dentro.
 webview2-com = "0.39"
 windows-core = "0.62"
+# Esperar operaciones de WinRT (Windows Hello, ver src/passwords.rs).
+windows-future = "0.3"
 # IStream: leer los bytes del favicon que entrega WebView2 (ver
 # native::stream_to_data_url). Media_Audio: nombre e icono de Michi en el
 # mezclador de volumen (ver src/audio.rs). Misma version que usa webview2-com.
-windows = { version = "0.62", features = ["Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Media_Audio"] }
+windows = { version = "0.62", features = ["Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Media_Audio", "Win32_System_WinRT", "Security_Credentials_UI", "Foundation"] }
 
 # Incrustar el icono en el .exe (ver build.rs).
 [build-dependencies]

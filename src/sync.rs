@@ -84,6 +84,10 @@ pub fn push_active_tab(state: &Shared) {
         // Pagina de una extension en Chrome Web Store / Edge Add-ons: la barra
         // ofrece "Agregar a Michi" (ver extensions::store_id).
         "storeExtension": extensions::store_id(&tab.url).is_some(),
+        // La llave de la barra (cuentas guardadas para este sitio) y "Guardar
+        // la contrasena?" (ver passwords.rs).
+        "passwordCount": st.passwords.count_for(&tab.url),
+        "passwordOffer": crate::passwords::offer_view(&tab.password_offer),
         "extensionStatus": st.extension_status,
     });
 
@@ -341,6 +345,24 @@ pub fn push_extension_status(state: &Shared) {
     let msg = serde_json::to_string(&state.borrow().extension_status).unwrap_or_default();
     for_own_pages(state, &format!("window.onExtensionStatus && window.onExtensionStatus({msg})"));
     push_active_tab(state);
+}
+
+/// Solo a las pestanas que muestran Ajustes (no a la pestana nueva).
+fn for_settings(state: &Shared, js: &str) {
+    let st = state.borrow();
+    for tab in st.tabs.iter().filter(|t| own_page_path(&t.url) == Some("/settings")) {
+        let _ = tab.webview.evaluate_script(js);
+    }
+}
+
+/// Ajustes > Contrasenas: la lista (sin las contrasenas).
+pub fn push_passwords(state: &Shared, data: &Value) {
+    for_settings(state, &format!("window.onPasswords && window.onPasswords({data})"));
+}
+
+/// Ajustes > Contrasenas: una contrasena, despues de Windows Hello.
+pub fn push_password_revealed(state: &Shared, data: &Value) {
+    for_settings(state, &format!("window.onPasswordRevealed && window.onPasswordRevealed({data})"));
 }
 
 /// Resultado de una accion de la pagina de ajustes ("Datos borrados", etc).

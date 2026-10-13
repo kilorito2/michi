@@ -150,6 +150,38 @@
   .star.on svg { fill: currentColor; }
   .star[hidden] { display: none; }
 
+  /* Llave: hay contrasenas guardadas para este sitio (un clic las rellena). */
+  .key {
+    flex: none; width: 24px; height: 24px; margin-right: -6px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-dim);
+    transition: background .15s ease, color .15s ease;
+  }
+  .key:hover { background: var(--glass-bg-strong); color: var(--text); }
+  .key svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .key[hidden] { display: none; }
+
+  /* "Guardar la contrasena?": en el lugar de la barra de direcciones. */
+  .pw-offer {
+    flex: 1 1 auto; max-width: 720px; min-width: 0; height: 34px; padding: 0 4px 0 12px;
+    display: flex; align-items: center; gap: 8px; border-radius: 999px;
+    background: rgba(139,123,255,0.22); border: 1px solid rgba(139,123,255,0.65);
+    color: var(--text); font-size: 12.5px;
+    animation: pw-in .18s ease;
+  }
+  @keyframes pw-in { from { opacity: 0; transform: translateY(-4px); } }
+  .pw-offer[hidden] { display: none; }
+  .bar.offering .addr-wrap { display: none; }
+  .pw-offer svg { flex: none; width: 15px; height: 15px; fill: none; stroke: #c9bfff; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  .pw-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pw-text b { font-weight: 600; }
+  .pw-btn {
+    flex: none; height: 26px; padding: 0 11px; border-radius: 999px; cursor: pointer;
+    font: inherit; font-size: 12px; color: var(--text); background: transparent; border: 1px solid transparent;
+  }
+  .pw-btn:hover { background: var(--glass-bg-strong); }
+  .pw-btn.primary { background: var(--accent); color: #fff; font-weight: 600; }
+  .pw-btn.primary:hover { background: #9a8cff; }
+
   /* "Agregar a Michi" en paginas de Chrome Web Store / Edge Add-ons. */
   .store-btn {
     flex: none; height: 24px; padding: 0 10px; margin-right: -6px; border-radius: 999px;
@@ -204,9 +236,22 @@
         <svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6z"/><path d="m9.5 9.5 5 5M14.5 9.5l-5 5"/></svg>
       </div>
       <button class="store-btn" id="store" hidden title="Instalar esta extensión">Agregar a Michi</button>
+      <div class="key" id="key" title="Contraseñas guardadas para este sitio" hidden>
+        <svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4"/><path d="m10.5 12.5 9-9M16 7l2.5 2.5M18.5 4.5 21 7"/></svg>
+      </div>
       <div class="star" id="star" title="Agregar a marcadores (Ctrl+D)" hidden>
         <svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>
       </div>
+    </div>
+
+    <!-- "Guardar la contrasena?" (ver src/passwords.rs): ocupa el lugar de la
+         barra de direcciones hasta que se responde. -->
+    <div class="pw-offer" id="pw-offer" hidden role="alertdialog" aria-labelledby="pw-text">
+      <svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4"/><path d="m10.5 12.5 9-9M16 7l2.5 2.5M18.5 4.5 21 7"/></svg>
+      <span class="pw-text" id="pw-text"></span>
+      <button class="pw-btn" id="pw-never">Nunca en este sitio</button>
+      <button class="pw-btn" id="pw-dismiss">Ahora no</button>
+      <button class="pw-btn primary" id="pw-save">Guardar</button>
     </div>
 
     <div class="drag-spacer"></div>
@@ -447,6 +492,26 @@
     star.classList.toggle('on', !!data.bookmarked);
     star.title = data.bookmarked ? 'Quitar de marcadores (Ctrl+D)' : 'Agregar a marcadores (Ctrl+D)';
 
+    // Contrasenas: la llave si hay cuentas guardadas para este sitio, y la
+    // pregunta de guardar si se acaba de iniciar sesion.
+    document.getElementById('key').hidden = !data.passwordCount;
+    document.getElementById('key').title = data.passwordCount === 1
+      ? 'Rellenar con la contraseña guardada para este sitio'
+      : 'Rellenar con una de las ' + data.passwordCount + ' contraseñas guardadas para este sitio';
+    const offer = data.passwordOffer;
+    const offerEl = document.getElementById('pw-offer');
+    offerEl.hidden = !offer;
+    bar.classList.toggle('offering', !!offer);
+    if (offer) {
+      const text = document.getElementById('pw-text');
+      text.textContent = '';
+      const who = document.createElement('b');
+      who.textContent = offer.username || 'la contraseña';
+      const site = document.createElement('b');
+      site.textContent = offer.host;
+      text.append(offer.update ? '¿Actualizar la contraseña de ' : (offer.username ? '¿Guardar la contraseña de ' : '¿Guardar '), who, ' en ', site, '?');
+    }
+
     // Mientras se instala, el boton muestra el progreso en vez de "Agregar".
     const store = document.getElementById('store');
     const busy = /\.\.\.$/.test(data.extensionStatus || '');
@@ -478,6 +543,11 @@
       bar.appendChild(b);
     });
   };
+
+  document.getElementById('key').addEventListener('click', () => ipc('password_menu'));
+  document.getElementById('pw-save').addEventListener('click', () => ipc('password_answer', { choice: 'save' }));
+  document.getElementById('pw-never').addEventListener('click', () => ipc('password_answer', { choice: 'never' }));
+  document.getElementById('pw-dismiss').addEventListener('click', () => ipc('password_answer', { choice: 'dismiss' }));
 
   // Rust -> UI: hay (o no) una version nueva de Michi (ver src/update.rs).
   const updateBtn = document.getElementById('update');

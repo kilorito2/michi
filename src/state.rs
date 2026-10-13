@@ -110,6 +110,8 @@ pub struct Tab {
     /// Grupo al que pertenece (ver groups.rs). Las de un mismo grupo van
     /// siempre juntas en `tabs`, y una fijada nunca tiene grupo.
     pub group: Option<u64>,
+    /// "Guardar la contrasena?" esperando respuesta (ver passwords.rs).
+    pub password_offer: Option<crate::passwords::Offer>,
 }
 
 /// Un grupo de pestanas: un nombre y un color en el panel, que se puede
@@ -186,6 +188,8 @@ pub enum UserEvent {
     ReloadHung(u64),
     /// Novedades de la busqueda o la descarga de una actualizacion (ver update.rs).
     Update(crate::update::Event),
+    /// Termino la verificacion de Windows Hello para ver una contrasena (ver passwords.rs).
+    PasswordsVerified(bool),
 }
 
 /// Algo que hay que hacer en la proxima vuelta del bucle de eventos (ver
@@ -425,6 +429,8 @@ pub struct AppState {
     pub background_chain: Option<(u64, u64)>,
     /// Grupos de pestanas (ver groups.rs).
     pub groups: Vec<TabGroup>,
+    /// Contrasenas guardadas (ver passwords.rs).
+    pub passwords: crate::passwords::Passwords,
 
     next_id: u64,
 }
@@ -476,6 +482,7 @@ impl AppState {
             update: Default::default(),
             background_chain: None,
             groups: Vec::new(),
+            passwords: crate::passwords::Passwords::load(),
 
             next_id: 1,
         }

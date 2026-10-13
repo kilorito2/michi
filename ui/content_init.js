@@ -146,3 +146,55 @@
   setTimeout(run, 1000);
   setTimeout(run, 2500);
 })();
+
+// Contrasenas (ver src/passwords.rs): al enviar un formulario con una
+// contrasena escrita, le avisa a Michi el usuario y la contrasena para que la
+// barra pregunte si guardarlas. Solo en la pagina principal (nunca en un
+// iframe de otro sitio); Michi mira de que sitio viene el aviso y nada se
+// guarda sin que lo aceptes. No rellena nada solo: eso pasa al tocar la llave
+// de la barra.
+(function () {
+  if (window.top !== window || !window.ipc || typeof window.ipc.postMessage !== 'function') return;
+  var last = '';
+
+  function textLike(el) {
+    var t = (el.type || 'text').toLowerCase();
+    return t === 'text' || t === 'email' || t === 'tel';
+  }
+
+  function grab(root) {
+    root = root && root.querySelectorAll ? root : document;
+    var pws = Array.prototype.filter.call(root.querySelectorAll('input[type=password]'), function (i) { return i.value; });
+    if (!pws.length) return;
+    // En "crear cuenta" o "cambiar contrasena" hay dos o tres: la nueva es la
+    // ultima (la de confirmar, si coincide con la anterior).
+    var pw = pws[pws.length - 1];
+    var user = '';
+    var inputs = root.querySelectorAll('input');
+    for (var i = 0; i < inputs.length; i++) {
+      if (inputs[i] === pws[0]) break;
+      if (textLike(inputs[i]) && inputs[i].value) user = inputs[i].value;
+    }
+    if (!user) {
+      var named = document.querySelector('input[autocomplete~=username], input[autocomplete~=email], input[type=email]');
+      if (named && named.value) user = named.value;
+    }
+    var msg = JSON.stringify({ u: user, p: pw.value });
+    if (msg === last) return;
+    last = msg;
+    try { window.ipc.postMessage('michi:pw:' + msg); } catch (e) {}
+  }
+
+  window.addEventListener('submit', function (e) { grab(e.target); }, true);
+  // Muchos sitios no envian un <form>: un boton con JavaScript, o Enter.
+  window.addEventListener('keydown', function (e) {
+    var t = e.target;
+    if (e.key === 'Enter' && t && t.type === 'password') grab(t.form || document);
+  }, true);
+  window.addEventListener('click', function (e) {
+    var b = e.target && e.target.closest && e.target.closest('button, input[type=submit], [role=button]');
+    if (!b) return;
+    var form = b.form || b.closest('form');
+    setTimeout(function () { grab(form || document); }, 0);
+  }, true);
+})();
