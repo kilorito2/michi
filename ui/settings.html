@@ -93,6 +93,9 @@
   .btn.danger:hover { background: rgba(255,107,107,0.25); border-color: var(--danger); }
   .btn[disabled] { opacity: .45; pointer-events: none; }
   .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .progress { height: 4px; margin-top: 9px; border-radius: 2px; background: rgba(255,255,255,0.12); overflow: hidden; }
+  .progress[hidden] { display: none; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* Interruptor */
@@ -228,23 +231,23 @@
         <div class="row">
           <div class="text">
             <div class="title">Buscador predeterminado</div>
-            <div class="desc">Se usa en la barra de direcciones y en la pestana nueva.</div>
+            <div class="desc">Se usa en la barra de direcciones y en la pestaña nueva.</div>
           </div>
           <select id="engine" aria-label="Buscador predeterminado"></select>
         </div>
         <div class="row">
           <div class="text">
-            <div class="title">Sugerencias de busqueda</div>
-            <div class="desc">Mientras escribes en la barra, el buscador te sugiere busquedas. Para eso recibe lo que vas escribiendo (nunca las direcciones). Tu historial, marcadores y pestanas se sugieren igual, sin enviar nada.</div>
+            <div class="title">Sugerencias de búsqueda</div>
+            <div class="desc">Mientras escribes en la barra, el buscador te sugiere búsquedas. Para eso recibe lo que vas escribiendo (nunca las direcciones). Tu historial, marcadores y pestañas se sugieren igual, sin enviar nada.</div>
           </div>
-          <label class="switch"><input type="checkbox" id="search-suggestions" aria-label="Sugerencias de busqueda" /><span class="track"></span></label>
+          <label class="switch"><input type="checkbox" id="search-suggestions" aria-label="Sugerencias de búsqueda" /><span class="track"></span></label>
         </div>
       </div>
 
       <h3>Al iniciar</h3>
       <div class="card">
-        <label class="choice"><input type="radio" name="startup" value="newtab" /> Abrir una pestana nueva</label>
-        <label class="choice"><input type="radio" name="startup" value="restore" /> Restaurar las pestanas de la ultima vez</label>
+        <label class="choice"><input type="radio" name="startup" value="newtab" /> Abrir una pestaña nueva</label>
+        <label class="choice"><input type="radio" name="startup" value="restore" /> Restaurar las pestañas de la última vez</label>
       </div>
     </section>
 
@@ -254,12 +257,12 @@
       <h3>Fondo</h3>
       <div class="themes" id="themes"></div>
 
-      <h3>Paginas</h3>
+      <h3>Páginas</h3>
       <div class="card">
         <div class="row">
           <div class="text">
             <div class="title">Zoom predeterminado</div>
-            <div class="desc">Con que tamano abre cada pestana nueva. Ctrl + rueda del mouse lo cambia en una pagina.</div>
+            <div class="desc">Con qué tamaño se ven los sitios. Ctrl + rueda del mouse (o Ctrl + / Ctrl -) lo cambia en un sitio, y Michi lo recuerda para ese sitio.</div>
           </div>
           <select id="zoom" aria-label="Zoom predeterminado">
             <option value="0.67">67%</option><option value="0.75">75%</option><option value="0.8">80%</option>
@@ -267,6 +270,13 @@
             <option value="1.25">125%</option><option value="1.5">150%</option><option value="1.75">175%</option>
             <option value="2">200%</option>
           </select>
+        </div>
+        <div class="row">
+          <div class="text">
+            <div class="title">Zoom de cada sitio</div>
+            <div class="desc" id="site-zoom-desc">Ningún sitio tiene un zoom propio.</div>
+          </div>
+          <button class="btn" id="site-zoom-clear">Olvidar</button>
         </div>
       </div>
     </section>
@@ -278,16 +288,16 @@
       <div class="card">
         <div class="row">
           <div class="text">
-            <div class="title">Navegacion segura (Microsoft Defender SmartScreen)</div>
-            <div class="desc">Avisa antes de abrir sitios de phishing o con malware y revisa la reputacion de lo que descargas. Para eso envia a Microsoft las direcciones que visitas.</div>
-            <div class="desc warn" id="smartscreen-off" hidden>Windows tiene apagado SmartScreen para Microsoft Edge, y mientras siga asi esta proteccion no actua. Se enciende en Seguridad de Windows &gt; Control de aplicaciones y navegador &gt; Proteccion basada en la reputacion.</div>
+            <div class="title">Navegación segura (Microsoft Defender SmartScreen)</div>
+            <div class="desc">Avisa antes de abrir sitios de phishing o con malware y revisa la reputación de lo que descargas. Para eso envía a Microsoft las direcciones que visitas.</div>
+            <div class="desc warn" id="smartscreen-off" hidden>Windows tiene apagado SmartScreen para Microsoft Edge, y mientras siga así esta protección no actúa. Se enciende en Seguridad de Windows &gt; Control de aplicaciones y navegador &gt; Protección basada en la reputación.</div>
           </div>
-          <label class="switch"><input type="checkbox" id="smartscreen" aria-label="Navegacion segura" /><span class="track"></span></label>
+          <label class="switch"><input type="checkbox" id="smartscreen" aria-label="Navegación segura" /><span class="track"></span></label>
         </div>
         <div class="row">
           <div class="text">
             <div class="title">Conexiones seguras (HTTPS)</div>
-            <div class="desc">Abre cada sitio primero con una conexion cifrada. Si el sitio no la ofrece, se abre igual sin cifrar (y la barra lo marca como no seguro) o se avisa antes, segun elijas.</div>
+            <div class="desc">Abre cada sitio primero con una conexión cifrada. Si el sitio no la ofrece, se abre igual sin cifrar (y la barra lo marca como no seguro) o se avisa antes, según elijas.</div>
           </div>
           <select id="https-mode" aria-label="Conexiones seguras">
             <option value="upgrade">Usar HTTPS cuando exista</option>
@@ -298,7 +308,7 @@
         <div class="row">
           <div class="text">
             <div class="title">Permitir que May controle Michi</div>
-            <div class="desc">May, la asistente de voz, puede abrir, cambiar y cerrar pestanas, leer las paginas, hacer clic y escribir en ellas, como si fueras vos. Solo desde esta PC.</div>
+            <div class="desc">May, la asistente de voz, puede abrir, cambiar y cerrar pestañas, leer las páginas, hacer clic y escribir en ellas, como si fueras vos. Solo desde esta PC.</div>
           </div>
           <label class="switch"><input type="checkbox" id="allow-assistant" aria-label="Permitir que May controle Michi" /><span class="track"></span></label>
         </div>
@@ -308,11 +318,11 @@
       <div class="card">
         <div class="row">
           <div class="text">
-            <div class="title">Prevencion de seguimiento</div>
-            <div class="desc">Bloquea los rastreadores que siguen lo que haces de un sitio a otro. La estricta bloquea mas, pero algunos sitios pueden fallar.</div>
+            <div class="title">Prevención de seguimiento</div>
+            <div class="desc">Bloquea los rastreadores que siguen lo que haces de un sitio a otro. La estricta bloquea más, pero algunos sitios pueden fallar.</div>
           </div>
-          <select id="tracking" aria-label="Prevencion de seguimiento">
-            <option value="basic">Basica</option>
+          <select id="tracking" aria-label="Prevención de seguimiento">
+            <option value="basic">Básica</option>
             <option value="balanced">Equilibrada</option>
             <option value="strict">Estricta</option>
             <option value="off">Desactivada</option>
@@ -321,33 +331,55 @@
         <div class="row">
           <div class="text">
             <div class="title">Borrar datos al cerrar</div>
-            <div class="desc">Al salir se borran el historial, las cookies, la cache y la lista de descargas, y las pestanas no se restauran. Vas a tener que volver a iniciar sesion en los sitios.</div>
+            <div class="desc">Al salir se borran el historial, las cookies, la cache y la lista de descargas, y las pestañas no se restauran. Vas a tener que volver a iniciar sesión en los sitios.</div>
           </div>
           <label class="switch"><input type="checkbox" id="clear-on-exit" aria-label="Borrar datos al cerrar" /><span class="track"></span></label>
         </div>
       </div>
 
-      <h3>Incognito</h3>
+      <h3>Contraseñas y formularios</h3>
       <div class="card">
         <div class="row">
           <div class="text">
-            <div class="title">Pestana de incognito</div>
-            <div class="desc">Una pestana que no guarda historial, cookies ni datos de sitios: al cerrarla se borra todo lo que paso en ella, y no se restaura al iniciar. Los enlaces que abras desde una pestana de incognito se abren tambien en incognito. Las descargas y los marcadores que guardes se conservan, y tu proveedor de internet y los sitios que visitas igual pueden ver lo que haces. Tambien se abre con Ctrl+Mayus+N o desde el menu.</div>
+            <div class="title">Ofrecer guardar contraseñas</div>
+            <div class="desc">Al iniciar sesión en un sitio, Michi pregunta si guardar la contraseña, y la completa sola la próxima vez. Se guardan en esta PC, cifradas por Windows.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="save-passwords" aria-label="Ofrecer guardar contraseñas" /><span class="track"></span></label>
+        </div>
+        <div class="row">
+          <div class="text">
+            <div class="title">Completar formularios</div>
+            <div class="desc">Sugiere lo que ya escribiste antes en campos parecidos: nombre, correo, dirección, teléfono.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="autofill" aria-label="Completar formularios" /><span class="track"></span></label>
+        </div>
+      </div>
+
+      <h3>Incógnito</h3>
+      <div class="card">
+        <div class="row">
+          <div class="text">
+            <div class="title">Pestaña de incógnito</div>
+            <div class="desc">Una pestaña que no guarda historial, cookies ni datos de sitios: al cerrarla se borra todo lo que paso en ella, y no se restaura al iniciar. Los enlaces que abras desde una pestaña de incógnito se abren también en incógnito. Las descargas y los marcadores que guardes se conservan, y tu proveedor de internet y los sitios que visitas igual pueden ver lo que haces. También se abre con Ctrl+Mayús+N o desde el menú.</div>
           </div>
           <button class="btn primary" id="incog-open">Abrir</button>
         </div>
       </div>
 
-      <h3>Borrar datos de navegacion</h3>
+      <h3>Borrar datos de navegación</h3>
       <div class="card">
         <label class="check"><input type="checkbox" id="clr-history" checked />
-          <div><div class="title">Historial de navegacion</div><div class="desc" id="history-count">Paginas visitadas y pestanas cerradas recientemente</div></div></label>
+          <div><div class="title">Historial de navegación</div><div class="desc" id="history-count">Páginas visitadas y pestañas cerradas recientemente</div></div></label>
         <label class="check"><input type="checkbox" id="clr-cookies" />
-          <div><div class="title">Cookies y otros datos de sitios</div><div class="desc">Cierra la sesion en la mayoria de los sitios</div></div></label>
+          <div><div class="title">Cookies y otros datos de sitios</div><div class="desc">Cierra la sesión en la mayoría de los sitios</div></div></label>
         <label class="check"><input type="checkbox" id="clr-cache" checked />
-          <div><div class="title">Imagenes y archivos en cache</div><div class="desc">Libera espacio; algunos sitios cargaran mas lento la proxima vez</div></div></label>
+          <div><div class="title">Imágenes y archivos en cache</div><div class="desc">Libera espacio; algunos sitios cargarán más lento la próxima vez</div></div></label>
         <label class="check"><input type="checkbox" id="clr-downloads" />
           <div><div class="title">Lista de descargas</div><div class="desc">Solo la lista; los archivos descargados no se borran</div></div></label>
+        <label class="check"><input type="checkbox" id="clr-passwords" />
+          <div><div class="title">Contraseñas guardadas</div><div class="desc">Las que Michi guardó para completar al iniciar sesión</div></div></label>
+        <label class="check"><input type="checkbox" id="clr-autofill" />
+          <div><div class="title">Datos de formularios</div><div class="desc">Lo guardado para completar nombre, dirección, teléfono...</div></div></label>
         <div class="row"><div class="text"></div><button class="btn danger" id="clear">Borrar datos</button></div>
       </div>
 
@@ -356,14 +388,14 @@
         <div class="row">
           <div class="text">
             <div class="title">Bloquear ventanas emergentes</div>
-            <div class="desc">Los sitios no pueden abrir pestanas nuevas por su cuenta; lo que abres con un clic se abre igual. Cuando se bloquea una, aparece un escudo en la barra de direcciones para abrirla si la querias.</div>
+            <div class="desc">Los sitios no pueden abrir pestañas nuevas por su cuenta; lo que abres con un clic se abre igual. Cuando se bloquea una, aparece un escudo en la barra de direcciones para abrirla si la querías.</div>
           </div>
           <label class="switch"><input type="checkbox" id="block-popups" aria-label="Bloquear ventanas emergentes" /><span class="track"></span></label>
         </div>
       </div>
 
       <h3>Permisos</h3>
-      <p class="note lead">Cada sitio te pregunta la primera vez que quiere usar alguno de estos. Con "Bloquear", ningun sitio puede ni preguntar. Ademas, las notificaciones solo se pueden pedir despues de un clic, y los sitios sin conexion segura no pueden pedir ninguno.</p>
+      <p class="note lead">Cada sitio te pregunta la primera vez que quiere usar alguno de estos. Con "Bloquear", ningún sitio puede ni preguntar. Además, las notificaciones solo se pueden pedir después de un clic, y los sitios sin conexión segura no pueden pedir ninguno.</p>
       <div class="card" id="perm-kinds"></div>
 
       <h3>Permisos guardados de cada sitio</h3>
@@ -373,19 +405,19 @@
     <!-- RENDIMIENTO -->
     <section id="performance">
       <h2>Rendimiento</h2>
-      <p class="note lead">Michi puede gastar menos memoria, procesador y tarjeta grafica a cambio de algunas comodidades. El cambio se aplica en el momento, sin reiniciar.</p>
+      <p class="note lead">Michi puede gastar menos memoria, procesador y tarjeta gráfica a cambio de algunas comodidades. El cambio se aplica en el momento, sin reiniciar.</p>
       <div class="card">
         <label class="choice rich"><input type="radio" name="perf" value="normal" />
           <div><div class="title">Normal</div>
-          <div class="desc">Todo como siempre: fondo animado y pestanas siempre al dia.</div></div></label>
+          <div class="desc">Todo como siempre: fondo animado y pestañas siempre al día.</div></div></label>
         <label class="choice rich"><input type="radio" name="perf" value="optimized" />
           <div><div class="title">Optimizado</div>
-          <div class="desc">El fondo animado se pausa cuando Michi no esta en primer plano (con otra ventana al frente o minimizado). Las pestanas de atras usan menos memoria y, a los 10 minutos sin usarlas, se duermen.</div></div></label>
+          <div class="desc">El fondo animado se pausa cuando Michi no está en primer plano (con otra ventana al frente o minimizado). Las pestañas de atrás usan menos memoria y, a los 10 minutos sin usarlas, se duermen.</div></div></label>
         <label class="choice rich"><input type="radio" name="perf" value="super" />
           <div><div class="title">Super optimizado</div>
-          <div class="desc">El fondo es una imagen fija (no se reproduce ningun video), la interfaz no anima nada y los paneles se abren de golpe. Las pestanas de atras usan la menor memoria posible y se duermen a los 2 minutos sin usarlas.</div></div></label>
+          <div class="desc">El fondo es una imagen fija (no se reproduce ningún video), la interfaz no anima nada y los paneles se abren de golpe. Las pestañas de atrás usan la menor memoria posible y se duermen a los 2 minutos sin usarlas.</div></div></label>
       </div>
-      <p class="note">Una pestana dormida no ejecuta su pagina: se pausan sus temporizadores y conexiones, asi que un chat o un correo abierto de fondo no te avisa de lo nuevo hasta que vuelvas a ella, y al volver se reanuda sola. Nunca se duerme una pestana que reproduce sonido o video, que esta cargando, ni las paginas de Michi (esta de ajustes, la pestana nueva).</p>
+      <p class="note">Una pestaña dormida no ejecuta su página: se pausan sus temporizadores y conexiones, así que un chat o un correo abierto de fondo no te avisa de lo nuevo hasta que vuelvas a ella, y al volver se reanuda sola. Nunca se duerme una pestaña que reproduce sonido o video, que está cargando, ni las páginas de Michi (esta de ajustes, la pestaña nueva).</p>
     </section>
 
     <!-- DESCARGAS -->
@@ -394,7 +426,7 @@
       <div class="card">
         <div class="row">
           <div class="text">
-            <div class="title">Ubicacion</div>
+            <div class="title">Ubicación</div>
             <div class="desc mono" id="dl-dir"></div>
           </div>
           <div class="btns">
@@ -408,9 +440,9 @@
     <!-- IMPORTAR -->
     <section id="import">
       <h2>Importar de otro navegador</h2>
-      <p class="note lead">Trae tus marcadores, el historial, las sesiones iniciadas (cookies) y las pestanas abiertas desde otro navegador instalado en esta PC. Se agregan a lo que ya tienes en Michi, sin reemplazar nada.</p>
+      <p class="note lead">Trae tus marcadores, el historial, las sesiones iniciadas (cookies) y las pestañas abiertas desde otro navegador instalado en esta PC. Se agregan a lo que ya tienes en Michi, sin reemplazar nada.</p>
       <div class="card" id="import-list"><div class="empty">Buscando navegadores...</div></div>
-      <p class="note">Para que las sesiones se copien bien, cierra antes el otro navegador. En los navegadores basados en Chromium (Chrome, Edge, Brave, Opera, Vivaldi) las cookies van cifradas por Windows y no se pueden importar: se traen los marcadores y el historial, pero vas a tener que iniciar sesion de nuevo en esos sitios.</p>
+      <p class="note">Para que las sesiones se copien bien, cierra antes el otro navegador. En los navegadores basados en Chromium (Chrome, Edge, Brave, Opera, Vivaldi) las cookies van cifradas por Windows y no se pueden importar: se traen los marcadores y el historial, pero vas a tener que iniciar sesión de nuevo en esos sitios.</p>
     </section>
 
     <!-- EXTENSIONES -->
@@ -425,13 +457,13 @@
       <div class="status" id="ext-status" role="status" aria-live="polite"></div>
       <div class="card" id="ext-list"><div class="empty">Cargando...</div></div>
       <p class="note">
-        Para instalar desde la tienda: abre la pagina de la extension en Chrome Web Store o Complementos de Edge y
+        Para instalar desde la tienda: abre la página de la extensión en Chrome Web Store o Complementos de Edge y
         toca <b>Agregar a Michi</b> en la barra de direcciones. Las extensiones activas que tienen ventana
-        propia aparecen como un icono en la barra superior, junto al boton <b>+</b>.
+        propia aparecen como un icono en la barra superior, junto al botón <b>+</b>.
       </p>
       <p class="note">
-        Antes de instalar se verifica la firma digital del paquete y se muestra lo que la extension va a poder hacer.
-        Las que vienen en un .zip o una carpeta no tienen firma: instala solo las de fuentes en las que confies.
+        Antes de instalar se verifica la firma digital del paquete y se muestra lo que la extensión va a poder hacer.
+        Las que vienen en un .zip o una carpeta no tienen firma: instala solo las de fuentes en las que confíes.
       </p>
     </section>
 
@@ -448,6 +480,24 @@
         </div>
         <div class="row">
           <div class="text">
+            <div class="title">Actualizaciones</div>
+            <div class="desc" id="update-desc">Michi busca versiones nuevas en GitHub al iniciar.</div>
+            <div class="progress" id="update-progress" hidden><div id="update-bar"></div></div>
+          </div>
+          <div class="btns">
+            <button class="btn" id="update-check">Buscar ahora</button>
+            <button class="btn primary" id="update-install" hidden>Descargar e instalar</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="text">
+            <div class="title">Buscar actualizaciones al iniciar</div>
+            <div class="desc">Como mucho dos veces por día. Solo se le pregunta a GitHub cuál es la última versión; nada se descarga ni se instala sin que lo pidas.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="check-updates" aria-label="Buscar actualizaciones al iniciar" /><span class="track"></span></label>
+        </div>
+        <div class="row">
+          <div class="text">
             <div class="title">Carpeta de datos</div>
             <div class="desc mono" id="data-dir"></div>
           </div>
@@ -455,7 +505,7 @@
         <div class="row">
           <div class="text">
             <div class="title">Restablecer ajustes</div>
-            <div class="desc">Vuelve buscador, fondo, zoom, descargas, inicio y las opciones de privacidad y seguridad a sus valores de fabrica. No borra marcadores, historial, extensiones ni los permisos de los sitios.</div>
+            <div class="desc">Vuelve buscador, fondo, zoom, descargas, inicio y las opciones de privacidad y seguridad a sus valores de fábrica. No borra marcadores, historial, extensiones ni los permisos de los sitios.</div>
           </div>
           <button class="btn danger" id="reset">Restablecer</button>
         </div>
@@ -463,16 +513,16 @@
 
       <h3>Atajos de teclado</h3>
       <div class="card keys">
-        <div>Nueva pestana</div><div><kbd>Ctrl</kbd> <kbd>T</kbd></div>
-        <div>Pestana de incognito</div><div><kbd>Ctrl</kbd> <kbd>Mayus</kbd> <kbd>N</kbd></div>
-        <div>Cerrar pestana</div><div><kbd>Ctrl</kbd> <kbd>W</kbd></div>
-        <div>Reabrir pestana cerrada</div><div><kbd>Ctrl</kbd> <kbd>Mayus</kbd> <kbd>T</kbd></div>
-        <div>Pestana siguiente / anterior</div><div><kbd>Ctrl</kbd> <kbd>Tab</kbd> &nbsp;/&nbsp; <kbd>Ctrl</kbd> <kbd>Mayus</kbd> <kbd>Tab</kbd></div>
+        <div>Nueva pestaña</div><div><kbd>Ctrl</kbd> <kbd>T</kbd></div>
+        <div>Pestaña de incógnito</div><div><kbd>Ctrl</kbd> <kbd>Mayús</kbd> <kbd>N</kbd></div>
+        <div>Cerrar pestaña</div><div><kbd>Ctrl</kbd> <kbd>W</kbd></div>
+        <div>Reabrir pestaña cerrada</div><div><kbd>Ctrl</kbd> <kbd>Mayús</kbd> <kbd>T</kbd></div>
+        <div>Pestaña siguiente / anterior</div><div><kbd>Ctrl</kbd> <kbd>Tab</kbd> &nbsp;/&nbsp; <kbd>Ctrl</kbd> <kbd>Mayús</kbd> <kbd>Tab</kbd></div>
         <div>Ir a la barra de direcciones</div><div><kbd>Ctrl</kbd> <kbd>L</kbd></div>
         <div>Agregar/quitar marcador</div><div><kbd>Ctrl</kbd> <kbd>D</kbd></div>
         <div>Historial, descargas y marcadores</div><div><kbd>Ctrl</kbd> <kbd>H</kbd></div>
-        <div>Menu</div><div><kbd>Alt</kbd> <kbd>F</kbd></div>
-        <div>Buscar en la pagina</div><div><kbd>Ctrl</kbd> <kbd>F</kbd></div>
+        <div>Menú</div><div><kbd>Alt</kbd> <kbd>F</kbd></div>
+        <div>Buscar en la página</div><div><kbd>Ctrl</kbd> <kbd>F</kbd></div>
         <div>Recargar</div><div><kbd>F5</kbd></div>
         <div>Zoom</div><div><kbd>Ctrl</kbd> <kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></div>
         <div>Imprimir</div><div><kbd>Ctrl</kbd> <kbd>P</kbd></div>
@@ -535,12 +585,19 @@
   $('https-mode').addEventListener('change', function () { set('httpsMode', this.value); });
   $('tracking').addEventListener('change', function () { set('trackingPrevention', this.value); });
   $('clear-on-exit').addEventListener('change', function () { set('clearOnExit', this.checked); });
+  $('save-passwords').addEventListener('change', function () { set('savePasswords', this.checked); });
+  $('autofill').addEventListener('change', function () { set('autofill', this.checked); });
+  $('check-updates').addEventListener('change', function () { set('checkUpdates', this.checked); });
+  $('site-zoom-clear').addEventListener('click', function () { ipc('clear_site_zoom'); });
+  $('update-check').addEventListener('click', function () { ipc('update_check'); });
+  $('update-install').addEventListener('click', function () { ipc('update_install'); });
   $('dl-pick').addEventListener('click', function () { ipc('pick_downloads_dir'); });
   $('dl-reset').addEventListener('click', function () { set('downloadsDir', null); });
   $('clear').addEventListener('click', function () {
     ipc('clear_data', {
       history: $('clr-history').checked, cookies: $('clr-cookies').checked,
       cache: $('clr-cache').checked, downloads: $('clr-downloads').checked,
+      passwords: $('clr-passwords').checked, autofill: $('clr-autofill').checked,
     });
   });
   $('reset').addEventListener('click', function () { ipc('reset_settings'); });
@@ -552,6 +609,25 @@
 
   // --- Rust -> pagina ---
   var themesBuilt = false;
+  // Ajustes > Acerca de > Actualizaciones (ver src/update.rs).
+  function showUpdate(u, current) {
+    var text = {
+      idle: 'Tienes Michi ' + current + '.',
+      checking: 'Buscando una versión nueva...',
+      uptodate: 'Michi está al día (' + current + ').',
+      available: 'Hay una versión nueva: Michi ' + u.version + ' (tienes la ' + current + ').',
+      downloading: 'Descargando Michi ' + u.version + '... ' + Math.floor((u.progress || 0) * 100) + '%',
+      installing: 'Abriendo el instalador. Michi se va a cerrar para actualizarse.',
+      failed: u.error || 'No se pudo buscar la versión nueva.',
+    }[u.phase] || '';
+    $('update-desc').textContent = text;
+    $('update-desc').classList.toggle('warn', u.phase === 'failed');
+    $('update-install').hidden = u.phase !== 'available';
+    $('update-check').disabled = u.phase === 'checking' || u.phase === 'downloading' || u.phase === 'installing';
+    $('update-progress').hidden = u.phase !== 'downloading';
+    $('update-bar').style.width = Math.floor((u.progress || 0) * 100) + '%';
+  }
+
   window.onSettings = function (d) {
     var s = d.settings;
     var engine = $('engine');
@@ -574,12 +650,20 @@
     $('https-mode').value = s.httpsMode;
     $('tracking').value = s.trackingPrevention;
     $('clear-on-exit').checked = s.clearOnExit;
+    $('save-passwords').checked = s.savePasswords;
+    $('autofill').checked = s.autofill;
+    $('check-updates').checked = s.checkUpdates;
+    $('site-zoom-desc').textContent = d.siteZoomCount
+      ? (d.siteZoomCount === 1 ? 'Un sitio tiene' : d.siteZoomCount + ' sitios tienen') + ' su propio zoom. Se olvida también al borrar el historial.'
+      : 'Ningún sitio tiene un zoom propio.';
+    $('site-zoom-clear').disabled = !d.siteZoomCount;
+    showUpdate(d.update, d.appVersion);
     showPermissionKinds(d.permissionKinds, s.blockedPermissions);
     $('dl-dir').textContent = d.downloadsDir;
     $('dl-reset').disabled = !s.downloadsDir;
     $('history-count').textContent = d.historyCount
-      ? d.historyCount + ' paginas visitadas y pestanas cerradas recientemente'
-      : 'Paginas visitadas y pestanas cerradas recientemente';
+      ? d.historyCount + ' páginas visitadas y pestañas cerradas recientemente'
+      : 'Páginas visitadas y pestañas cerradas recientemente';
     $('app-version').textContent = d.appVersion;
     $('engine-version').textContent = 'Motor: Microsoft Edge WebView2 ' + d.engineVersion;
     $('data-dir').textContent = d.dataDir;
@@ -648,7 +732,7 @@
   window.onSitePermissions = function (list) {
     var el = $('site-perms');
     if (!list.length) {
-      el.innerHTML = '<div class="empty">Ningun sitio tiene permisos guardados.</div>';
+      el.innerHTML = '<div class="empty">Ningún sitio tiene permisos guardados.</div>';
       return;
     }
     el.innerHTML = '';
@@ -688,11 +772,11 @@
   window.onExtensions = function (list, supported) {
     var el = $('ext-list');
     if (!supported) {
-      el.innerHTML = '<div class="empty">Esta version de Microsoft Edge WebView2 no soporta extensiones.<br>Actualizala desde Windows Update o microsoft.com/edge/webview2.</div>';
+      el.innerHTML = '<div class="empty">Esta versión de Microsoft Edge WebView2 no soporta extensiones.<br>Actualízala desde Windows Update o microsoft.com/edge/webview2.</div>';
       return;
     }
     if (!list.length) {
-      el.innerHTML = '<div class="empty">Todavia no instalaste extensiones.<br>Busca una en Chrome Web Store (por ejemplo uBlock Origin o Dark Reader) y toca <b>Agregar a Michi</b>.</div>';
+      el.innerHTML = '<div class="empty">Todavía no instalaste extensiones.<br>Busca una en Chrome Web Store (por ejemplo uBlock Origin o Dark Reader) y toca <b>Agregar a Michi</b>.</div>';
       return;
     }
     el.innerHTML = '';
@@ -735,7 +819,7 @@
     { key: 'bookmarks', label: 'Marcadores' },
     { key: 'history', label: 'Historial' },
     { key: 'cookies', label: 'Sesiones (cookies)' },
-    { key: 'tabs', label: 'Pestanas abiertas' },
+    { key: 'tabs', label: 'Pestañas abiertas' },
   ];
   window.onImportSources = function (list) {
     var el = $('import-list');

@@ -72,7 +72,7 @@ pub fn build_right_panel(state: &Shared) -> WebView {
             crate::ipc::dispatch(&s, &req.uri().to_string(), req.body());
         })
         .build_as_child(window.as_ref())
-        .expect("no se pudo crear el panel de pestanas")
+        .expect("no se pudo crear el panel de pestañas")
 }
 
 pub fn build_left_panel(state: &Shared) -> WebView {

@@ -28,7 +28,7 @@ use crate::{layout, sync};
 const REOPEN_GUARD: Duration = Duration::from_millis(250);
 
 pub fn build(state: &Shared) -> WebView {
-    let window = state.borrow().window.clone().expect("la ventana debe existir antes del menu");
+    let window = state.borrow().window.clone().expect("la ventana debe existir antes del menú");
     let s = state.clone();
     // Solo puede mostrar su propia pagina (ver security::chrome_builder).
     crate::security::chrome_builder()
@@ -38,7 +38,7 @@ pub fn build(state: &Shared) -> WebView {
         .with_bounds(bounds(0.0))
         .with_ipc_handler(move |req: Request<String>| crate::ipc::dispatch(&s, &req.uri().to_string(), req.body()))
         .build_as_child(window.as_ref())
-        .expect("no se pudo crear el menu")
+        .expect("no se pudo crear el menú")
 }
 
 fn bounds(win_w: f64) -> Rect {

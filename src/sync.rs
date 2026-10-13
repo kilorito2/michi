@@ -25,6 +25,11 @@ pub fn push_tabs(state: &Shared) {
                 "active": i == st.active,
                 "favicon": t.favicon,
                 "incognito": t.incognito,
+                "pinned": t.pinned,
+                "muted": t.muted,
+                // Esta sonando (aunque este silenciada: el icono lo dice).
+                "audible": t.playing.audio,
+                "crashed": own_page_path(&t.url) == Some("/crashed"),
             })
         })
         .collect();
@@ -44,11 +49,12 @@ pub fn push_active_tab(state: &Shared) {
     let can_fwd = tab.webview.can_go_forward().unwrap_or(false);
 
     // En la pagina de aviso de HTTPS la barra muestra el sitio pendiente (y
-    // que no es seguro), no la direccion interna del aviso.
-    let pending = tab.sec.insecure_target.as_ref().filter(|_| own_page_path(&tab.url) == Some("/insecure"));
-    let (url, security) = match pending {
-        Some(target) => (target.as_str(), "insecure"),
-        None => (tab.url.as_str(), security::indicator(&tab.url, &st.cert_errors)),
+    // que no es seguro), no la direccion interna del aviso; en la de "dejo
+    // de funcionar", el sitio que se cayo.
+    let url = tab.real_url();
+    let security = match own_page_path(&tab.url) {
+        Some("/insecure") if url != tab.url => "insecure",
+        _ => security::indicator(url, &st.cert_errors),
     };
 
     let data = json!({
@@ -236,29 +242,14 @@ pub fn push_downloads(state: &Shared) {
     }
 }
 
+/// El historial del panel izquierdo (ver library.rs: buscador, por dia).
 pub fn push_history(state: &Shared) {
-    let st = state.borrow();
-    // El panel muestra las ultimas; no hace falta mandarle las 1000.
-    let start = st.history.len().saturating_sub(100);
-    let data: Vec<_> = st.history[start..]
-        .iter()
-        .map(|h| json!({ "title": h.title, "url": h.url }))
-        .collect();
-
-    if let Some(lp) = &st.left_panel {
-        if let Ok(payload) = serde_json::to_string(&data) {
-            let _ = lp.evaluate_script(&format!("window.onHistory && window.onHistory({payload})"));
-        }
-    }
+    crate::library::push_history(state);
 }
 
+/// Los marcadores del panel izquierdo, con sus carpetas (ver library.rs).
 pub fn push_bookmarks(state: &Shared) {
-    let st = state.borrow();
-    if let Some(lp) = &st.left_panel {
-        if let Ok(payload) = serde_json::to_string(&st.bookmarks) {
-            let _ = lp.evaluate_script(&format!("window.onBookmarks && window.onBookmarks({payload})"));
-        }
-    }
+    crate::library::push_bookmarks(state);
 }
 
 /// Estado que muestra el menu "..." (zoom de la pestana activa, marcador).
@@ -315,6 +306,8 @@ pub fn push_own_pages(state: &Shared) {
             "dataDir": storage::data_dir(),
             "historyCount": st.history.len(),
             "bookmarkCount": st.bookmarks.len(),
+            "siteZoomCount": st.site_zoom.len(),
+            "update": crate::update::view(&st),
         })
     };
     for_own_pages(state, &format!("window.onSettings && window.onSettings({data})"));
@@ -356,6 +349,16 @@ pub fn push_site_permissions(state: &Shared, list: &Value) {
 pub fn push_import_sources(state: &Shared, sources: &[crate::import::Source]) {
     let payload = serde_json::to_string(sources).unwrap_or_else(|_| "[]".into());
     for_own_pages(state, &format!("window.onImportSources && window.onImportSources({payload})"));
+}
+
+/// Lo que se cayo, para la pagina "dejo de funcionar" de esa pestana.
+pub fn push_crashed(state: &Shared, tab_id: u64) {
+    let Some((url, title, reason)) = crate::recovery::crash_info(state, tab_id) else { return };
+    let data = json!({ "url": url, "host": security::host_of(&url).unwrap_or_default(), "title": title, "reason": reason });
+    let st = state.borrow();
+    if let Some(tab) = st.tabs.iter().find(|t| t.id == tab_id && is_own_page(&t.url)) {
+        let _ = tab.webview.evaluate_script(&format!("window.onCrashed && window.onCrashed({data})"));
+    }
 }
 
 /// Sitio pendiente de la pagina de aviso de HTTPS de esa pestana.

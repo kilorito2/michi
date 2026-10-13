@@ -63,9 +63,9 @@
   <div class="card" role="alert">
     <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.2h.01"/></svg></div>
     <h1>Este sitio no admite conexiones seguras</h1>
-    <p id="desc">Esta pagina de aviso ya no tiene un sitio pendiente.</p>
-    <p>Si continuas, la conexion no va cifrada: alguien en tu misma red (un wifi publico, por ejemplo) podria ver
-      lo que envias y recibes, incluidas contrasenas y datos de tarjetas, o cambiar la pagina que ves.</p>
+    <p id="desc">Esta página de aviso ya no tiene un sitio pendiente.</p>
+    <p>Si continuas, la conexión no va cifrada: alguien en tu misma red (un wifi público, por ejemplo) podría ver
+      lo que envías y recibes, incluidas contraseñas y datos de tarjetas, o cambiar la página que ves.</p>
     <div class="btns">
       <button class="btn primary" id="back" autofocus>Volver</button>
       <button class="btn risky" id="go" hidden>Continuar al sitio (no seguro)</button>
@@ -89,7 +89,7 @@
     host.className = 'host';
     host.textContent = d.host;
     desc.textContent = '';
-    desc.append('Se intento abrir ', host, ' con una conexion segura (HTTPS), pero el sitio no la ofrece.');
+    desc.append('Se intentó abrir ', host, ' con una conexión segura (HTTPS), pero el sitio no la ofrece.');
     go.hidden = false;
     document.title = d.host + ' - Sitio no seguro';
   };

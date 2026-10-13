@@ -6,7 +6,7 @@ use wry::dpi::{LogicalPosition, LogicalSize};
 use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2Environment};
 use wry::{PageLoadEvent, Rect, WebViewBuilderExtWindows, WebViewExtWindows};
 
-use crate::state::{is_own_page, HistoryEntry, PendingWindow, Shared, Tab, EDGE_IDLE, HOME_URL, TOPBAR_H};
+use crate::state::{is_own_page, own_page_path, HistoryEntry, PendingTab, PendingWindow, Shared, Tab, EDGE_IDLE, HOME_URL, TOPBAR_H};
 use crate::storage::HISTORY_MAX;
 use crate::{downloads, layout, permissions, security, shortcuts, sync};
 
@@ -25,14 +25,20 @@ pub fn is_bookmarkable(url: &str) -> bool {
 }
 
 pub fn open_tab(state: &Shared, url: &str, incognito: bool) {
-    let _ = create_tab(state, url, None, incognito);
+    let _ = create_tab(state, url, None, incognito, false);
+}
+
+/// Una pestana pedida con AppState::request_tab (o atras, con
+/// request_background_tab).
+pub fn open_pending(state: &Shared, p: PendingTab) {
+    let _ = create_tab(state, &p.url, None, p.incognito, p.background);
 }
 
 /// window.open() de una pagina (ver state::PendingWindow): la pestana nace
 /// sin navegar, en el entorno de la pagina que la abre, y se la entregamos
 /// al motor como la ventana nueva; el motor la lleva a `url`.
 pub fn open_window(state: &Shared, w: PendingWindow) {
-    let core = create_tab(state, &w.url, Some(w.environment), w.incognito);
+    let core = create_tab(state, &w.url, Some(w.environment), w.incognito, false);
     unsafe {
         // Sin pestana, window.open() devuelve null (como con un bloqueador).
         if let Some(core) = &core {
@@ -43,29 +49,24 @@ pub fn open_window(state: &Shared, w: PendingWindow) {
     }
 }
 
-/// Crea la pestana y la deja al frente. Con `environment` es una ventana de
-/// window.open(): no navega (eso lo hace el motor despues de SetNewWindow).
+/// Crea la pestana y la deja al frente (o atras, junto a la activa, con
+/// `background`). Con `environment` es una ventana de window.open(): no
+/// navega (eso lo hace el motor despues de SetNewWindow).
 /// `incognito`: perfil InPrivate, sin rastro en historial ni sesion.
 fn create_tab(
     state: &Shared,
     url: &str,
     environment: Option<ICoreWebView2Environment>,
     incognito: bool,
+    background: bool,
 ) -> Option<ICoreWebView2> {
     let id = state.borrow_mut().alloc_id();
-    let is_window = environment.is_some();
 
     // Clonamos el Rc<Window> y soltamos el prestamo de `state` de inmediato:
     // construir el WebView puede disparar callbacks (on_page_load, etc.) de
     // forma sincronica, y esos callbacks tambien necesitan pedir prestado
     // `state`, asi que no podemos mantener un borrow() vivo durante el build.
-    let (window, zoom) = {
-        let st = state.borrow();
-        (
-            st.window.clone().expect("la ventana debe existir antes de crear pestanas"),
-            st.settings.default_zoom,
-        )
-    };
+    let window = state.borrow().window.clone()?;
 
     let webview = {
         // Bounds provisorios: layout::relayout(state), llamado al final de esta
@@ -138,6 +139,10 @@ fn create_tab(
                     if let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) {
                         tab.url = page_url.clone();
                         tab.loading = matches!(event, PageLoadEvent::Started);
+                        // Lo de la pagina caida ya paso (salvo en la pagina que lo cuenta).
+                        if own_page_path(&page_url) != Some("/crashed") {
+                            tab.crashed = None;
+                        }
                         // La pagina nueva avisa por su cuenta si reproduce algo.
                         if tab.loading {
                             tab.playing.video = false;
@@ -161,13 +166,20 @@ fn create_tab(
                         && !page_url.starts_with("chrome-extension://")
                         && st.history.last().map(|h| &h.url) != Some(&page_url)
                     {
-                        st.history.push(HistoryEntry { title: title_snapshot, url: page_url });
+                        st.history.push(HistoryEntry {
+                            title: title_snapshot,
+                            url: page_url,
+                            time: crate::storage::now_secs(),
+                        });
+
                         let excess = st.history.len().saturating_sub(HISTORY_MAX);
                         st.history.drain(..excess);
                         st.save_history();
                     }
                     st.save_session();
                 }
+                // Cada sitio con su zoom (ver zoom.rs).
+                crate::zoom::apply(&state_load, id);
                 sync::push_media(&state_load);
                 sync::push_history(&state_load);
                 sync::push_active_tab(&state_load);
@@ -175,14 +187,15 @@ fn create_tab(
             })
             .build_as_child(window.as_ref())
     };
+    // Que no se pueda crear una pestana (WebView2 sin memoria, o cerrandose)
+    // nunca tira abajo el navegador con todas las demas: queda en el log y
+    // el resto sigue andando.
     let webview = match webview {
         Ok(webview) => webview,
-        // Una pagina que abre una ventana no puede tirar abajo el navegador.
-        Err(e) if is_window => {
-            eprintln!("[pestanas] no se pudo crear la ventana de window.open: {e}");
+        Err(e) => {
+            eprintln!("[pestanas] no se pudo crear la pestana ({url}): {e}");
             return None;
         }
-        Err(e) => panic!("no se pudo crear el webview de la pestana: {e}"),
     };
 
     security::attach_tab(state, &webview, id);
@@ -193,29 +206,57 @@ fn create_tab(
     permissions::attach(state, &webview);
     shortcuts::attach(state, &webview, false);
     downloads::attach(state, &webview);
-    if (zoom - 1.0).abs() > f64::EPSILON {
-        let _ = webview.zoom(zoom);
-    }
+    crate::recovery::attach(state, &webview, Some(id));
+    crate::zoom::attach(state, &webview, id);
+    crate::context_menu::attach(state, &webview, id);
 
     let core = webview.webview();
+    let tab = Tab {
+        id,
+        webview,
+        title: String::new(),
+        url: url.to_string(),
+        loading: true,
+        favicon: None,
+        sec: Default::default(),
+        playing: Default::default(),
+        incognito,
+        rest: Default::default(),
+        crashed: None,
+        pinned: false,
+        muted: false,
+    };
     {
         let mut st = state.borrow_mut();
-        st.tabs.push(Tab {
-            id,
-            webview,
-            title: String::new(),
-            url: url.to_string(),
-            loading: true,
-            favicon: None,
-            sec: Default::default(),
-            playing: Default::default(),
-            incognito,
-            rest: Default::default(),
-        });
-        st.active = st.tabs.len() - 1;
+        if background {
+            // Junto a la activa, despues de las que ya se abrieron atras desde
+            // ella (en orden, como en Chrome), y nunca entre las fijadas.
+            let active_id = st.active_tab().map(|t| t.id);
+            let after_chain = st
+                .background_chain
+                .filter(|(opener, _)| Some(*opener) == active_id)
+                .and_then(|(_, last)| st.tabs.iter().position(|t| t.id == last));
+            let at = after_chain.unwrap_or(st.active).saturating_add(1).max(st.pinned_count()).min(st.tabs.len());
+            st.tabs.insert(at, tab);
+            if at <= st.active {
+                st.active += 1;
+            }
+            st.background_chain = active_id.map(|opener| (opener, id));
+        } else {
+            st.tabs.push(tab);
+            st.active = st.tabs.len() - 1;
+        }
     }
+    crate::zoom::apply(state, id);
 
-    activated(state);
+    if background {
+        layout::relayout(state);
+        sync::push_tabs(state);
+        state.borrow().save_session();
+        crate::perf::on_activated(state);
+    } else {
+        activated(state);
+    }
     Some(core)
 }
 
@@ -243,10 +284,12 @@ fn on_source_changed(state: &Shared, webview: &wry::WebView, id: u64) {
             }
         };
         if changed {
+            crate::zoom::apply(&s, id);
             sync::push_tabs(&s);
             sync::push_active_tab(&s);
             s.borrow().save_session();
         }
+
         Ok(())
     }));
     let mut token = 0i64;
@@ -358,4 +401,104 @@ pub fn close_tab(state: &Shared, id: u64) {
     }
 
     activated(state);
+}
+
+/// Lleva la pestana `id` a la posicion `to` (lo que se arrastro en el panel).
+/// Las fijadas solo se mueven entre fijadas, y las demas, debajo de ellas.
+pub fn move_tab(state: &Shared, id: u64, to: usize) {
+    {
+        let mut st = state.borrow_mut();
+        let Some(from) = st.tabs.iter().position(|t| t.id == id) else { return };
+        let pinned = st.pinned_count();
+        let (lo, hi) = if st.tabs[from].pinned { (0, pinned - 1) } else { (pinned, st.tabs.len() - 1) };
+        let to = to.clamp(lo, hi);
+        if to == from {
+            return;
+        }
+        let active_id = st.active_tab().map(|t| t.id);
+        let tab = st.tabs.remove(from);
+        st.tabs.insert(to, tab);
+        if let Some(i) = active_id.and_then(|a| st.tabs.iter().position(|t| t.id == a)) {
+            st.active = i;
+        }
+        st.save_session();
+    }
+    sync::push_tabs(state);
+}
+
+/// Fija (o desfija) una pestana: pasa al final de las fijadas, o justo
+/// debajo de ellas.
+pub fn set_pinned(state: &Shared, id: u64, pinned: bool) {
+    {
+        let mut st = state.borrow_mut();
+        let Some(from) = st.tabs.iter().position(|t| t.id == id) else { return };
+        if st.tabs[from].pinned == pinned {
+            return;
+        }
+        let active_id = st.active_tab().map(|t| t.id);
+        let mut tab = st.tabs.remove(from);
+        tab.pinned = pinned;
+        let at = st.pinned_count();
+        st.tabs.insert(at, tab);
+        if let Some(i) = active_id.and_then(|a| st.tabs.iter().position(|t| t.id == a)) {
+            st.active = i;
+        }
+        st.save_session();
+    }
+    sync::push_tabs(state);
+}
+
+/// Silencia (o vuelve a dejar sonar) una pestana.
+pub fn set_muted(state: &Shared, id: u64, muted: bool) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
+    use windows_core::Interface;
+    {
+        let mut st = state.borrow_mut();
+        let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) else { return };
+        let Ok(core) = tab.webview.webview().cast::<ICoreWebView2_8>() else { return };
+        if unsafe { core.SetIsMuted(muted) }.is_err() {
+            return;
+        }
+        tab.muted = muted;
+    }
+    sync::push_tabs(state);
+}
+
+/// Otra pestana con la misma pagina, justo al lado.
+pub fn duplicate(state: &Shared, id: u64) {
+    let mut st = state.borrow_mut();
+    let Some(tab) = st.tabs.iter().find(|t| t.id == id) else { return };
+    let (url, incognito) = (tab.real_url().to_string(), tab.incognito);
+    st.request_tab_in(&url, incognito);
+}
+
+/// Cierra todas menos `id` y las fijadas.
+pub fn close_others(state: &Shared, id: u64) {
+    let others: Vec<u64> = state.borrow().tabs.iter().filter(|t| t.id != id && !t.pinned).map(|t| t.id).collect();
+    for other in others {
+        close_tab(state, other);
+    }
+    let i = state.borrow().tabs.iter().position(|t| t.id == id);
+    if let Some(i) = i {
+        state.borrow_mut().active = i;
+        activated(state);
+    }
+}
+
+/// Vuelve a cargar una pestana. En la pagina de "dejo de funcionar", lo que
+/// se vuelve a cargar es el sitio que se cayo, no el aviso.
+pub fn reload(state: &Shared, id: u64) {
+    let crashed = {
+        let st = state.borrow();
+        let Some(tab) = st.tabs.iter().find(|t| t.id == id) else { return };
+        if own_page_path(&tab.url) == Some("/crashed") {
+            true
+        } else {
+            let _ = tab.webview.reload();
+            false
+        }
+    };
+    if crashed {
+        crate::recovery::reload_crashed(state, id);
+    }
 }

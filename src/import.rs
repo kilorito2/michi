@@ -360,6 +360,26 @@ fn query_pairs(conn: &rusqlite::Connection, sql: &str) -> Option<Vec<(String, St
     Some(rows.flatten().collect())
 }
 
+/// Historial: (titulo, url, cuando) -> entradas, con `to_secs` pasando la
+/// fecha de la base del otro navegador a segundos desde 1970. Las mas
+/// antiguas primero, para que al concatenarlas las recientes queden al final
+/// (como el historial propio, que crece agregando al final).
+fn query_history(conn: &rusqlite::Connection, sql: &str, to_secs: fn(i64) -> u64) -> Option<Vec<HistoryEntry>> {
+    let mut stmt = conn.prepare(sql).ok()?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(HistoryEntry {
+                title: r.get::<_, String>(0).unwrap_or_default(),
+                url: r.get(1)?,
+                time: to_secs(r.get::<_, i64>(2).unwrap_or(0)),
+            })
+        })
+        .ok()?;
+    let mut list: Vec<HistoryEntry> = rows.flatten().collect();
+    list.reverse();
+    Some(list)
+}
+
 fn firefox_bookmarks(conn: &rusqlite::Connection) -> Option<Vec<Bookmark>> {
     let pairs = query_pairs(
         conn,
@@ -367,19 +387,18 @@ fn firefox_bookmarks(conn: &rusqlite::Connection) -> Option<Vec<Bookmark>> {
          FROM moz_bookmarks b JOIN moz_places p ON b.fk = p.id \
          WHERE b.type = 1 AND p.url LIKE 'http%' ORDER BY b.dateAdded",
     )?;
-    Some(pairs.into_iter().map(|(title, url)| Bookmark { title, url }).collect())
+    Some(pairs.into_iter().map(|(title, url)| Bookmark { title, url, folder: String::new() }).collect())
 }
 
 fn firefox_history(conn: &rusqlite::Connection) -> Option<Vec<HistoryEntry>> {
-    // Mas antiguas primero, para que al concatenarlas las recientes queden al
-    // final (como el historial propio, que crece agregando al final).
-    let pairs = query_pairs(
+    // Firefox anota microsegundos desde 1970.
+    query_history(
         conn,
-        "SELECT COALESCE(title, ''), url FROM moz_places \
+        "SELECT COALESCE(title, ''), url, last_visit_date FROM moz_places \
          WHERE url LIKE 'http%' AND last_visit_date IS NOT NULL \
          ORDER BY last_visit_date DESC LIMIT 2000",
-    )?;
-    Some(pairs.into_iter().rev().map(|(title, url)| HistoryEntry { title, url }).collect())
+        |us| (us.max(0) / 1_000_000) as u64,
+    )
 }
 
 fn firefox_cookies(conn: &rusqlite::Connection) -> Option<Vec<Cookie>> {
@@ -407,12 +426,13 @@ fn firefox_cookies(conn: &rusqlite::Connection) -> Option<Vec<Cookie>> {
 }
 
 fn chromium_history(conn: &rusqlite::Connection) -> Option<Vec<HistoryEntry>> {
-    let pairs = query_pairs(
+    // Chromium anota microsegundos desde 1601.
+    query_history(
         conn,
-        "SELECT COALESCE(title, ''), url FROM urls \
+        "SELECT COALESCE(title, ''), url, last_visit_time FROM urls \
          WHERE url LIKE 'http%' ORDER BY last_visit_time DESC LIMIT 2000",
-    )?;
-    Some(pairs.into_iter().rev().map(|(title, url)| HistoryEntry { title, url }).collect())
+        |us| (us / 1_000_000 - 11_644_473_600).max(0) as u64,
+    )
 }
 
 /// Marcadores de Chromium: un JSON con un arbol de carpetas.
@@ -434,7 +454,7 @@ fn collect_chromium_bookmarks(node: &serde_json::Value, out: &mut Vec<Bookmark>)
             if let Some(url) = node.get("url").and_then(|u| u.as_str()) {
                 if url.starts_with("http") {
                     let title = node.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-                    out.push(Bookmark { title, url: url.to_string() });
+                    out.push(Bookmark { title, url: url.to_string(), folder: String::new() });
                 }
             }
         }
@@ -495,15 +515,22 @@ pub fn apply(state: &Shared, data: ImportData) {
     let (added_bm, added_hist) = {
         let mut st = state.borrow_mut();
 
+        // Los importados van juntos en una carpeta con el nombre del otro
+        // navegador: no se mezclan con los propios.
         let have: HashSet<String> = st.bookmarks.iter().map(|b| b.url.clone()).collect();
         let before = st.bookmarks.len();
+        let folder = crate::library::folder_name(&format!("De {}", data.source));
         for b in &data.bookmarks {
             if !have.contains(&b.url) {
-                st.bookmarks.push(b.clone());
+                st.bookmarks.push(Bookmark { folder: folder.clone(), ..b.clone() });
             }
         }
         let added_bm = st.bookmarks.len() - before;
         if added_bm > 0 {
+            if !st.bookmark_folders.contains(&folder) {
+                st.bookmark_folders.push(folder);
+                st.save_folders();
+            }
             st.save_bookmarks();
         }
 
@@ -514,7 +541,11 @@ pub fn apply(state: &Shared, data: ImportData) {
                 st.history.push(h.clone());
             }
         }
+        // Por fecha (estable: las de antes sin fecha quedan primero), asi el
+        // panel las agrupa por dia en orden.
+        st.history.sort_by_key(|h| h.time);
         let excess = st.history.len().saturating_sub(crate::storage::HISTORY_MAX);
+
         st.history.drain(..excess);
         let added_hist = st.history.len().saturating_sub(before.saturating_sub(excess));
         if !data.history.is_empty() {
@@ -563,7 +594,7 @@ pub fn apply(state: &Shared, data: ImportData) {
         if data.cookies_encrypted {
             format!("De {} se importaron los marcadores y el historial. Las sesiones de este navegador van cifradas y no se pueden importar.", data.source)
         } else {
-            format!("No habia nada nuevo para importar de {}", data.source)
+            format!("No había nada nuevo para importar de {}", data.source)
         }
     } else {
         let mut m = format!("Importado de {}: {}", data.source, join_es(&parts));

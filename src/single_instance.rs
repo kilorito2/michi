@@ -64,17 +64,27 @@ pub fn is_external_target(url: &str) -> bool {
 /// devuelve true igual: mejor otra ventana que un enlace que "no hace nada".
 pub fn claim(url: Option<&str>) -> bool {
     let name = wide(&format!("Local\\Michi-{:016x}", install_id()));
-    let mutex = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
-    if mutex.is_null() {
-        return true;
+    // Reabriendose despues de que se cayo WebView2 (ver recovery.rs): el Michi
+    // anterior esta terminando, y hay que esperar a que suelte el mutex en vez
+    // de pasarle lo pedido a el.
+    let recovering = crate::recovery::is_recovering();
+    let tries = if recovering { 50 } else { 1 };
+    for i in 0..tries {
+        let mutex = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        if mutex.is_null() {
+            return true;
+        }
+        if unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
+            // Somos el principal: el mutex queda abierto hasta que termine el
+            // proceso (Windows lo libera solo al salir, incluso si se cuelga).
+            return true;
+        }
+        unsafe { CloseHandle(mutex) };
+        if i + 1 < tries {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
-    if unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
-        // Somos el principal: el mutex queda abierto hasta que termine el
-        // proceso (Windows lo libera solo al salir, incluso si se cuelga).
-        return true;
-    }
-    unsafe { CloseHandle(mutex) };
-    !forward(url)
+    recovering || !forward(url)
 }
 
 /// Le pasa al principal lo pedido. Mensaje: "1<url>" para abrir, "0" para solo

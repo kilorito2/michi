@@ -95,6 +95,11 @@ pub const SESSION_FILE: &str = "session.json";
 /// Logo (favicon) de cada sitio visitado, para las sugerencias de la barra
 /// (ver suggest.rs). Dice que sitios se visitaron: se borra con el historial.
 pub const FAVICONS_FILE: &str = "favicons.json";
+/// Carpetas de marcadores, en orden (las vacias tambien; ver library.rs).
+pub const FOLDERS_FILE: &str = "bookmark_folders.json";
+/// Zoom elegido para cada sitio (ver zoom.rs). Dice que sitios se visitaron:
+/// se borra con el historial.
+pub const SITE_ZOOM_FILE: &str = "site_zoom.json";
 
 /// Tope del historial guardado (las entradas mas viejas se descartan).
 pub const HISTORY_MAX: usize = 1000;
@@ -140,6 +145,14 @@ pub struct Settings {
     /// Dejar que May (la asistente de voz) controle Michi por el pipe de
     /// control: pestanas, navegacion y la pagina (ver control.rs).
     pub allow_assistant: bool,
+    /// Ofrecer guardar las contrasenas que se escriben en los sitios (y
+    /// completarlas solas la proxima vez). Lo guarda el perfil de WebView2.
+    pub save_passwords: bool,
+    /// Completar formularios (nombre, direccion, telefono...) con lo que ya
+    /// se escribio antes.
+    pub autofill: bool,
+    /// Buscar versiones nuevas de Michi en GitHub al iniciar (ver update.rs).
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -159,6 +172,9 @@ impl Default for Settings {
             search_suggestions: true,
             performance: "normal".into(),
             allow_assistant: true,
+            save_passwords: true,
+            autofill: true,
+            check_updates: true,
         }
     }
 }
@@ -177,19 +193,38 @@ impl Settings {
 pub struct Bookmark {
     pub title: String,
     pub url: String,
+    /// Carpeta ("" = suelto, sin carpeta; ver library.rs).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub folder: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HistoryEntry {
     pub title: String,
     pub url: String,
+    /// Cuando se visito (segundos desde 1970). 0 = no se sabe: las entradas
+    /// guardadas por versiones anteriores, que no lo anotaban.
+    #[serde(default)]
+    pub time: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Session {
     pub urls: Vec<String>,
     pub active: usize,
+    /// Cuantas de las primeras estan fijadas.
+    #[serde(default)]
+    pub pinned: usize,
 }
+
+/// Ahora, en segundos desde 1970.
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 
 /// (id, nombre visible, URL de busqueda con {q} donde va la consulta)
 pub const SEARCH_ENGINES: &[(&str, &str, &str)] = &[

@@ -105,6 +105,52 @@
   }
   .tab-row:hover .tab-close { display: flex; }
   .tab-close:hover { background: var(--danger); color: white; }
+
+  /* Altavoz: la pestana suena (o esta silenciada). Un clic la silencia. */
+  .tab-audio {
+    flex: none; width: 20px; height: 20px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; color: var(--text-dim);
+  }
+  .tab-audio:hover { background: var(--glass-bg-strong); color: var(--text); }
+  .tab-audio svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .tab-audio.muted { color: #ffb4b4; }
+  .tab-row.crashed .tab-title { color: var(--text-dim); font-style: italic; }
+
+  /* Fijadas: solo el icono, en una grilla arriba de la lista. */
+  .pinned { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 6px; padding: 0 0 10px; }
+  .pinned:empty { display: none; }
+  .tile {
+    position: relative; height: 38px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--glass-bg); border: 1px solid transparent; cursor: pointer;
+    transition: background .15s ease, border-color .15s ease;
+  }
+  .tile:hover { background: var(--glass-bg-strong); }
+  .tile.active { background: var(--glass-bg-strong); border-color: var(--accent); }
+  .tile.incognito { background: rgba(176,140,255,0.14); }
+  .tile.incognito.active { border-color: #b08cff; }
+  .tile .badge {
+    position: absolute; right: 3px; bottom: 3px; width: 14px; height: 14px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; background: rgba(16,15,28,0.9); color: var(--text);
+  }
+  .tile .badge svg { width: 9px; height: 9px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .tile .badge.muted { color: #ffb4b4; }
+
+  /* Arrastrando para reordenar. */
+  .tab-row, .tile { touch-action: none; }
+  .dragging { opacity: .92; background: var(--glass-bg-strong) !important; box-shadow: 0 6px 18px rgba(0,0,0,.35); z-index: 2; }
+
+  /* Menu del clic derecho sobre una pestana. */
+  .ctx {
+    position: absolute; z-index: 10; min-width: 190px; padding: 5px;
+    background: rgba(24,22,38,0.97); border: 1px solid var(--glass-border); border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  }
+  .ctx[hidden] { display: none; }
+  .ctx-item { font-size: 12.5px; color: var(--text); padding: 7px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+  .ctx-item:hover { background: var(--glass-bg-strong); }
+  .ctx-item.danger:hover { background: rgba(255,107,107,0.25); }
+  .ctx-sep { height: 1px; margin: 4px 6px; background: var(--glass-border); }
 </style>
 </head>
 <body>
@@ -112,13 +158,15 @@
     <div class="grip-zone"><div class="grip"></div></div>
     <div class="panel">
       <div class="head">
-        <h1>Pestanas</h1>
-        <div class="add-btn" id="add" title="Nueva pestana (Ctrl+T)">
+        <h1>Pestañas</h1>
+        <div class="add-btn" id="add" title="Nueva pestaña (Ctrl+T)">
           <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
         </div>
       </div>
+      <div class="pinned" id="pinned"></div>
       <div class="list" id="list"></div>
     </div>
+    <div class="ctx" id="ctx" role="menu" hidden></div>
   </div>
 
 <script src="/wallpaper.js" data-variant="blur"></script>
@@ -155,61 +203,211 @@
     surface.classList.toggle('expanded', value);
   };
 
-  window.onTabs = function (tabs) {
-    const list = document.getElementById('list');
+  const GHOST = '<svg class="tab-ghost" viewBox="0 0 24 24"><path d="M5 21V11a7 7 0 0 1 14 0v10l-2.4-2-2.3 2-2.3-2-2.3 2L7.4 19z"/><circle cx="9.6" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg>';
+  const SPEAKER = '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18.2 6.5a8 8 0 0 1 0 11"/></svg>';
+  const MUTED = '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></svg>';
+
+  const list = document.getElementById('list');
+  const pinnedEl = document.getElementById('pinned');
+  const ctx = document.getElementById('ctx');
+
+  // Lo ultimo que mando Rust. Con el boton apretado sobre una pestana no se
+  // redibuja (se perderia el arrastre): se guarda y se pinta al soltar.
+  let tabs = [];
+  let pendingTabs = null;
+  let drag = null;
+
+  function titleOf(t) {
+    return t.title && t.title.length ? t.title : (t.incognito ? 'Nueva pestaña de incógnito' : 'Nueva pestaña');
+  }
+
+  function icon(t) {
+    const ico = document.createElement('div');
+    ico.className = 'tab-ico';
+    function showDot() {
+      ico.innerHTML = '';
+      if (t.incognito) { ico.innerHTML = GHOST; return; }
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      ico.appendChild(dot);
+    }
+    if (t.favicon) {
+      const img = document.createElement('img');
+      img.alt = '';
+      // Si el data URL no es una imagen valida, cae al punto.
+      img.addEventListener('error', showDot);
+      img.src = t.favicon;
+      ico.appendChild(img);
+    } else {
+      showDot();
+    }
+    return ico;
+  }
+
+  function audioButton(t, cls) {
+    const b = document.createElement('div');
+    b.className = cls + (t.muted ? ' muted' : '');
+    b.title = t.muted ? 'Activar el sonido' : 'Silenciar la pestaña';
+    b.innerHTML = t.muted ? MUTED : SPEAKER;
+    b.addEventListener('click', (e) => { e.stopPropagation(); ipc('mute_tab', { id: t.id, muted: !t.muted }); });
+    return b;
+  }
+
+  function render(all) {
+    tabs = all;
     list.innerHTML = '';
-    tabs.forEach((t) => {
-      const row = document.createElement('div');
-      row.className = 'tab-row' + (t.active ? ' active' : '') + (t.incognito ? ' incognito' : '');
-      row.title = t.incognito ? 'Pestana de incognito' : '';
-      row.addEventListener('click', () => ipc('switch_tab', { id: t.id }));
-
-      const ico = document.createElement('div');
-      ico.className = 'tab-ico';
-      const GHOST = '<svg class="tab-ghost" viewBox="0 0 24 24"><path d="M5 21V11a7 7 0 0 1 14 0v10l-2.4-2-2.3 2-2.3-2-2.3 2L7.4 19z"/><circle cx="9.6" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg>';
-      function showDot() {
-        ico.innerHTML = '';
-        if (t.incognito) {
-          ico.innerHTML = GHOST;
-          return;
-        }
-        const dot = document.createElement('span');
-        dot.className = 'dot';
-        ico.appendChild(dot);
-      }
-      if (t.favicon) {
-        const img = document.createElement('img');
-        img.alt = '';
-        // Si el data URL no es una imagen valida, cae al punto.
-        img.addEventListener('error', showDot);
-        img.src = t.favicon;
-        ico.appendChild(img);
-      } else {
-        showDot();
-      }
-
-      const title = document.createElement('div');
-      title.className = 'tab-title';
-      title.textContent = t.title && t.title.length ? t.title : (t.incognito ? 'Nueva pestana de incognito' : 'Nueva pestana');
-
-      const close = document.createElement('div');
-      close.className = 'tab-close';
-      close.textContent = '✕';
-      close.addEventListener('click', (e) => { e.stopPropagation(); ipc('close_tab', { id: t.id }); });
-
-      row.appendChild(ico);
-      row.appendChild(title);
-      // Con el favicon del sitio en el icono, el fantasma va aca: asi una de
-      // incognito se distingue siempre.
-      if (t.incognito && t.favicon) {
-        const badge = document.createElement('span');
-        badge.style.display = 'flex';
-        badge.innerHTML = GHOST;
-        row.appendChild(badge);
-      }
-      row.appendChild(close);
-      list.appendChild(row);
+    pinnedEl.innerHTML = '';
+    all.forEach((t) => {
+      const el = t.pinned ? tile(t) : row(t);
+      el.dataset.id = t.id;
+      wire(el, t);
+      (t.pinned ? pinnedEl : list).appendChild(el);
     });
+  }
+
+  function row(t) {
+    const r = document.createElement('div');
+    r.className = 'tab-row' + (t.active ? ' active' : '') + (t.incognito ? ' incognito' : '') + (t.crashed ? ' crashed' : '');
+    r.title = t.incognito ? 'Pestaña de incógnito' : '';
+    r.appendChild(icon(t));
+    const title = document.createElement('div');
+    title.className = 'tab-title';
+    title.textContent = titleOf(t);
+    r.appendChild(title);
+    // Con el favicon del sitio en el icono, el fantasma va aca: asi una de
+    // incognito se distingue siempre.
+    if (t.incognito && t.favicon) {
+      const badge = document.createElement('span');
+      badge.style.display = 'flex';
+      badge.innerHTML = GHOST;
+      r.appendChild(badge);
+    }
+    if (t.audible || t.muted) r.appendChild(audioButton(t, 'tab-audio'));
+    const close = document.createElement('div');
+    close.className = 'tab-close';
+    close.title = 'Cerrar (Ctrl+W)';
+    close.textContent = '✕';
+    close.addEventListener('click', (e) => { e.stopPropagation(); ipc('close_tab', { id: t.id }); });
+    r.appendChild(close);
+    return r;
+  }
+
+  function tile(t) {
+    const el = document.createElement('div');
+    el.className = 'tile' + (t.active ? ' active' : '') + (t.incognito ? ' incognito' : '');
+    el.title = titleOf(t);
+    el.appendChild(icon(t));
+    if (t.audible || t.muted) el.appendChild(audioButton(t, 'badge'));
+    return el;
+  }
+
+  // Clic: ir a la pestana. Clic con la rueda: cerrarla. Arrastrar: moverla
+  // (las fijadas entre fijadas, las demas en la lista).
+  function wire(el, t) {
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.target.closest('.tab-close, .tab-audio, .badge')) return;
+      closeMenu();
+      drag = { id: t.id, el, x: e.clientX, y: e.clientY, moved: false, box: t.pinned ? pinnedEl : list };
+    });
+    el.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+    el.addEventListener('auxclick', (e) => {
+      if (e.button === 1) { e.preventDefault(); ipc('close_tab', { id: t.id }); }
+    });
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); openMenu(t, e.clientX, e.clientY); });
+  }
+
+  // Mueve el elemento arrastrado entre sus hermanos segun el puntero (en la
+  // lista, por la mitad de cada fila; en la grilla de fijadas, en orden de
+  // lectura).
+  function place(d, x, y) {
+    const grid = d.box === pinnedEl;
+    let before = null;
+    for (const c of d.box.children) {
+      if (c === d.el) continue;
+      const r = c.getBoundingClientRect();
+      const after = grid ? (y > r.bottom || (y >= r.top && x > r.left + r.width / 2)) : y > r.top + r.height / 2;
+      if (!after) { before = c; break; }
+    }
+    if (before !== d.el.nextSibling && before !== d.el) d.box.insertBefore(d.el, before);
+  }
+
+  // El movimiento y el soltar se escuchan en todo el documento y no en la
+  // fila: al moverla de lugar en la lista, el navegador le suelta la captura
+  // del puntero, y el aviso de soltar podia perderse (quedaba arrastrando).
+  document.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    // Se solto fuera del panel (o se perdio el aviso): termina ahi.
+    if (!(e.buttons & 1)) { finishDrag(false); return; }
+    if (!drag.moved) {
+      if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) < 6) return;
+      drag.moved = true;
+      drag.el.classList.add('dragging');
+    }
+    place(drag, e.clientX, e.clientY);
+  });
+  document.addEventListener('pointerup', () => finishDrag(false));
+  document.addEventListener('pointercancel', () => finishDrag(true));
+  window.addEventListener('blur', () => finishDrag(true));
+
+  function finishDrag(cancelled) {
+    if (!drag) return;
+    const d = drag;
+    const el = d.el;
+    drag = null;
+    el.classList.remove('dragging');
+    if (!d.moved) {
+      if (!cancelled) ipc('switch_tab', { id: d.id });
+    } else if (!cancelled) {
+      // Posicion en la lista completa: las fijadas van primero.
+      const index = Array.prototype.indexOf.call(d.box.children, el);
+      const offset = d.box === pinnedEl ? 0 : pinnedEl.children.length;
+      ipc('move_tab', { id: d.id, to: offset + index });
+    }
+    if (pendingTabs) { const p = pendingTabs; pendingTabs = null; render(p); }
+  }
+
+  // --- Menu del clic derecho ---
+  function openMenu(t, x, y) {
+    const others = tabs.some((o) => o.id !== t.id && !o.pinned);
+    const items = [
+      [t.pinned ? 'Desfijar pestaña' : 'Fijar pestaña', () => ipc('pin_tab', { id: t.id, pinned: !t.pinned })],
+      [t.muted ? 'Activar el sonido' : 'Silenciar pestaña', () => ipc('mute_tab', { id: t.id, muted: !t.muted })],
+      ['Volver a cargar', () => ipc('reload_tab', { id: t.id })],
+      ['Duplicar', () => ipc('duplicate_tab', { id: t.id })],
+      null,
+    ];
+    if (others) items.push(['Cerrar las demás', () => ipc('close_other_tabs', { id: t.id })]);
+    items.push(['Cerrar', () => ipc('close_tab', { id: t.id }), 'danger']);
+    ctx.innerHTML = '';
+    items.forEach((item) => {
+      if (!item) { const sep = document.createElement('div'); sep.className = 'ctx-sep'; ctx.appendChild(sep); return; }
+      const el = document.createElement('div');
+      el.className = 'ctx-item' + (item[2] ? ' ' + item[2] : '');
+      el.setAttribute('role', 'menuitem');
+      el.textContent = item[0];
+      el.addEventListener('click', () => { closeMenu(); item[1](); });
+      ctx.appendChild(el);
+    });
+    ctx.hidden = false;
+    const w = ctx.offsetWidth, h = ctx.offsetHeight;
+    ctx.style.left = Math.max(6, Math.min(x, window.innerWidth - w - 6)) + 'px';
+    ctx.style.top = Math.max(6, Math.min(y, window.innerHeight - h - 6)) + 'px';
+  }
+  function closeMenu() { ctx.hidden = true; }
+  document.addEventListener('pointerdown', (e) => { if (!ctx.hidden && !ctx.contains(e.target)) closeMenu(); }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+  // Fuera de las pestanas, sin el menu de WebView2 (Atras, Inspeccionar...).
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  const onExpandedBase = window.onExpanded;
+  window.onExpanded = function (value) {
+    onExpandedBase(value);
+    if (!value) closeMenu();
+  };
+
+  window.onTabs = function (all) {
+    if (drag) { pendingTabs = all; return; }
+    render(all);
   };
 
   ipc('ready');

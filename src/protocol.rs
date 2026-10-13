@@ -83,8 +83,8 @@ fn wallpapers_dir() -> &'static PathBuf {
 /// el tema es una imagen fija (STILLS en ese script).
 pub const THEMES: &[(&str, &str)] = &[
     ("sleepy-rainy-evening", "Lluvia nocturna"),
-    ("torii-carmesi", "Torii carmesi"),
-    ("blindfolded-girl", "Petalos y luna"),
+    ("torii-carmesi", "Torii carmesí"),
+    ("blindfolded-girl", "Pétalos y luna"),
     ("wuthering-waves-chisa", "Wuthering Waves"),
 ];
 
@@ -114,6 +114,7 @@ pub fn handle(request: Request<Vec<u8>>, responder: RequestAsyncResponder) {
         "/suggest" => Some(include_bytes!("../ui/suggest.html")),
         "/settings" => Some(include_bytes!("../ui/settings.html")),
         "/insecure" => Some(include_bytes!("../ui/insecure.html")),
+        "/crashed" => Some(include_bytes!("../ui/crashed.html")),
         _ => None,
     };
     if let Some(body) = page {
@@ -333,7 +334,7 @@ mod tests {
 
     #[test]
     fn every_page_script_gets_this_responses_nonce() {
-        let pages: [&'static [u8]; 8] = [
+        let pages: [&'static [u8]; 9] = [
             include_bytes!("../ui/newtab.html"),
             include_bytes!("../ui/topbar.html"),
             include_bytes!("../ui/sidebar_left.html"),
@@ -342,7 +343,9 @@ mod tests {
             include_bytes!("../ui/suggest.html"),
             include_bytes!("../ui/settings.html"),
             include_bytes!("../ui/insecure.html"),
+            include_bytes!("../ui/crashed.html"),
         ];
+
         for page in pages {
             let response = respond_page(page);
             let csp = response.headers()[CONTENT_SECURITY_POLICY].to_str().unwrap().to_string();

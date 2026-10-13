@@ -115,6 +115,71 @@
   }
   .row:hover .row-x { display: flex; }
   .row-x:hover { background: var(--danger); color: white; }
+
+  /* Icono del sitio en el historial y los marcadores (o el punto). */
+  .row-fav { flex: none; width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; }
+  .row-fav img { width: 16px; height: 16px; border-radius: 4px; object-fit: contain; }
+  .row-acts { flex: none; display: none; gap: 2px; }
+  .row:hover .row-acts { display: flex; }
+  .row-act {
+    width: 20px; height: 20px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 12px;
+  }
+  .row-act:hover { background: var(--glass-bg-strong); color: var(--text); }
+  .row-act.del:hover { background: var(--danger); color: white; }
+  .row-act svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .row-time { flex: none; font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .row:hover .row-time { display: none; }
+
+  .link-btn.danger { color: #ffb4b4; }
+  .link-btn.danger:hover { color: var(--danger); }
+  .confirm { font-size: 11px; color: var(--text); display: flex; gap: 8px; align-items: center; }
+  .confirm[hidden] { display: none; }
+
+  .search { position: relative; margin: 0 2px 4px; }
+  .search svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; fill: none; stroke: var(--text-dim); stroke-width: 2; stroke-linecap: round; pointer-events: none; }
+  .search input, .field input, .field select {
+    width: 100%; height: 30px; border-radius: 8px; padding: 0 10px 0 28px;
+    font: inherit; font-size: 12.5px; color: var(--text);
+    background: rgba(255,255,255,0.07); border: 1px solid var(--glass-border); outline: none;
+    user-select: text;
+  }
+  .search input::-webkit-search-cancel-button { filter: invert(1); opacity: .6; }
+  .search input:focus, .field input:focus, .field select:focus { border-color: var(--accent); background: rgba(255,255,255,0.1); }
+  .day { font-size: 10.5px; font-weight: 600; letter-spacing: .03em; color: var(--text-dim); padding: 8px 8px 2px; }
+  .more { font-size: 11.5px; color: var(--text-dim); text-align: center; padding: 6px; cursor: pointer; border-radius: 8px; }
+  .more:hover { color: var(--text); background: var(--glass-bg); }
+  .more[hidden] { display: none; }
+
+  /* Carpetas de marcadores. */
+  .folder { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 10px; cursor: pointer; }
+  .folder:hover { background: var(--glass-bg); }
+  .folder .chev { flex: none; width: 12px; height: 12px; fill: none; stroke: var(--text-dim); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s ease; }
+  .folder.open .chev { transform: rotate(90deg); }
+  .folder .fico { flex: none; width: 16px; height: 16px; fill: none; stroke: #ffd166; stroke-width: 1.8; stroke-linejoin: round; }
+  .folder .name { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .folder .count { font-size: 10.5px; color: var(--text-dim); }
+  .folder:hover .count { display: none; }
+  .folder:hover .row-acts { display: flex; }
+  .folder-items { display: flex; flex-direction: column; gap: 2px; padding-left: 14px; }
+  .folder-items[hidden] { display: none; }
+  .folder-items .empty { padding: 4px 8px 8px; }
+
+  /* Formulario en linea: editar un marcador, nombrar una carpeta. */
+  .form { display: flex; flex-direction: column; gap: 7px; padding: 10px; margin: 2px 0; border-radius: 10px; background: rgba(255,255,255,0.06); border: 1px solid var(--glass-border); }
+  .field label { display: block; font-size: 10.5px; color: var(--text-dim); margin: 0 0 3px 2px; }
+  .field input, .field select { padding: 0 9px; }
+  .field select option { background: #1d1b2e; color: var(--text); }
+  .form-btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px; }
+  .form-err { font-size: 11px; color: #ffb4b4; }
+  .form-err:empty { display: none; }
+  .btn-sm {
+    height: 26px; padding: 0 12px; border-radius: 7px; font: inherit; font-size: 11.5px; cursor: pointer;
+    background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--text);
+  }
+  .btn-sm:hover { background: var(--glass-bg-strong); }
+  .btn-sm.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-sm.primary:hover { background: #9a8cff; }
 </style>
 </head>
 <body>
@@ -126,20 +191,29 @@
           <h1>Descargas</h1>
           <div class="link-btn" id="open-folder">Abrir carpeta</div>
         </div>
-        <div class="list" id="downloads"><div class="empty">Sin descargas todavia</div></div>
+        <div class="list" id="downloads"><div class="empty">Sin descargas todavía</div></div>
       </section>
 
       <section>
         <div class="sec-head">
           <h1>Historial</h1>
+          <div class="confirm" id="clear-confirm" hidden>¿Borrar todo? <span class="link-btn danger" id="clear-yes">Sí</span> <span class="link-btn" id="clear-no">No</span></div>
           <div class="link-btn" id="clear-history">Borrar</div>
         </div>
-        <div class="list" id="history"><div class="empty">Sin paginas visitadas</div></div>
+        <div class="search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+          <input id="history-q" type="search" placeholder="Buscar en el historial" aria-label="Buscar en el historial" spellcheck="false" autocomplete="off" />
+        </div>
+        <div class="list" id="history"><div class="empty">Sin páginas visitadas</div></div>
+        <div class="more" id="history-more" hidden>Ver más</div>
       </section>
 
       <section>
-        <div class="sec-head"><h1>Marcadores</h1></div>
-        <div class="list" id="bookmarks"><div class="empty">Toca la estrella de la barra de direcciones (o Ctrl+D) para guardar una pagina</div></div>
+        <div class="sec-head">
+          <h1>Marcadores</h1>
+          <div class="link-btn" id="new-folder">Nueva carpeta</div>
+        </div>
+        <div class="list" id="bookmarks"><div class="empty">Toca la estrella de la barra de direcciones (o Ctrl+D) para guardar una página</div></div>
       </section>
 
       <section>
@@ -165,7 +239,6 @@
   }
 
   document.getElementById('open-folder').addEventListener('click', () => ipc('open_downloads_folder'));
-  document.getElementById('clear-history').addEventListener('click', () => ipc('clear_history'));
   document.getElementById('open-settings').addEventListener('click', () => ipc('menu', { action: 'settings' }));
   document.getElementById('open-extensions').addEventListener('click', () => ipc('menu', { action: 'extensions' }));
 
@@ -208,7 +281,7 @@
     const el = document.getElementById('downloads');
     if (!items.length) {
       dlRows.clear();
-      el.innerHTML = '<div class="empty">Sin descargas todavia</div>';
+      el.innerHTML = '<div class="empty">Sin descargas todavía</div>';
       return;
     }
     if (!dlRows.size) el.innerHTML = '';
@@ -255,13 +328,13 @@
       fill.classList.toggle('indeterminate', !d.total && d.status === 'downloading');
       const size = d.total ? fmtBytes(d.received) + ' de ' + fmtBytes(d.total) : fmtBytes(d.received);
       row.querySelector('.row-sub').textContent = d.dangerous
-        ? 'Este tipo de archivo puede danar tu equipo.' +
-          (d.insecureSource ? ' Ademas se descargo sin cifrar (HTTP).' : '') + ' Conservalo solo si confias en el sitio.'
+        ? 'Este tipo de archivo puede dañar tu equipo.' +
+          (d.insecureSource ? ' Además se descargó sin cifrar (HTTP).' : '') + ' Consérvalo solo si confías en el sitio.'
         : {
             downloading: size + (d.total ? '  -  ' + Math.floor(pct) + '%' : ''),
             paused: 'En pausa - ' + size,
             completed: 'Completado' + (d.total ? ' - ' + fmtBytes(d.total) : ''),
-            failed: 'Fallo',
+            failed: 'Falló',
             cancelled: 'Cancelado',
             blocked: 'Bloqueado: puede ser peligroso',
           }[d.status] || d.status;
@@ -291,48 +364,309 @@
     }
   };
 
-  window.onBookmarks = function (items) {
-    const el = document.getElementById('bookmarks');
+  const PENCIL = '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>';
+  const FOLDER = '<svg class="fico" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  const CHEV = '<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>';
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  // Icono del sitio, o el punto de siempre si no se conoce.
+  function favicon(icon, dotClass) {
+    const box = el('div', 'row-fav');
+    const dot = () => { box.innerHTML = ''; box.appendChild(el('div', 'row-icon ' + (dotClass || ''))); };
+    if (icon) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.addEventListener('error', dot);
+      img.src = icon;
+      box.appendChild(img);
+    } else {
+      dot();
+    }
+    return box;
+  }
+
+  function action(cls, title, html, onClick) {
+    const a = el('div', 'row-act ' + cls);
+    a.title = title;
+    a.innerHTML = html;
+    a.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+    return a;
+  }
+
+  // Mientras se escribe en el panel, Rust no lo cierra por alejar el cursor
+  // (solo con un clic fuera; ver panels::set_editing).
+  document.addEventListener('focusin', (e) => {
+    if (e.target.matches('input, select')) ipc('editing_left', { value: true });
+  });
+  document.addEventListener('focusout', (e) => {
+    if (e.target.matches('input, select')) setTimeout(() => {
+      if (!document.activeElement || !document.activeElement.matches('input, select')) ipc('editing_left', { value: false });
+    }, 0);
+  });
+  // Sin el menu de WebView2 (Atras, Inspeccionar...) en el panel; en los
+  // campos de texto si, para copiar y pegar.
+  document.addEventListener('contextmenu', (e) => { if (!e.target.matches('input')) e.preventDefault(); });
+
+  // ------------------------------------------------------------------
+  // Historial: buscador, por dia, y borrar de a una pagina.
+  // ------------------------------------------------------------------
+  const historyEl = document.getElementById('history');
+  const historyQ = document.getElementById('history-q');
+  const moreEl = document.getElementById('history-more');
+  let historyData = { items: [], query: '' };
+  let historyLimit = 40;
+
+  let searchTimer = null;
+  historyQ.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { historyLimit = 40; ipc('history_search', { q: historyQ.value }); }, 120);
+  });
+  historyQ.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && historyQ.value) { e.stopPropagation(); historyQ.value = ''; ipc('history_search', { q: '' }); }
+  });
+  moreEl.addEventListener('click', () => { historyLimit += 60; renderHistory(); });
+
+  // Confirmar antes de borrar todo el historial.
+  const clearBtn = document.getElementById('clear-history');
+  const clearConfirm = document.getElementById('clear-confirm');
+  function showConfirm(on) { clearConfirm.hidden = !on; clearBtn.hidden = on; }
+  clearBtn.addEventListener('click', () => showConfirm(true));
+  document.getElementById('clear-no').addEventListener('click', () => showConfirm(false));
+  document.getElementById('clear-yes').addEventListener('click', () => { showConfirm(false); ipc('clear_history'); });
+
+  const dayFmt = new Intl.DateTimeFormat('es', { weekday: 'long', day: 'numeric', month: 'long' });
+  const timeFmt = new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit' });
+  function dayLabel(secs) {
+    if (!secs) return 'Antes';
+    const d = new Date(secs * 1000);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const day = new Date(d); day.setHours(0, 0, 0, 0);
+    const diff = Math.round((today - day) / 86400000);
+    if (diff === 0) return 'Hoy';
+    if (diff === 1) return 'Ayer';
+    const label = dayFmt.format(d);
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+  // Como se ve en la barra: sin https:// ni www., y con las letras con tilde
+  // a la vista (no %C3%B3).
+  function shortUrl(url) {
+    let u = url.replace(/^https:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+    try { u = decodeURI(u); } catch (e) {}
+    return u;
+  }
+
+  function renderHistory() {
+    const items = historyData.items;
+    historyEl.innerHTML = '';
     if (!items.length) {
-      el.innerHTML = '<div class="empty">Toca la estrella de la barra de direcciones (o Ctrl+D) para guardar una pagina</div>';
+      historyEl.appendChild(el('div', 'empty', historyData.query ? 'Nada coincide con "' + historyData.query + '"' : 'Sin páginas visitadas'));
+      moreEl.hidden = true;
       return;
     }
-    el.innerHTML = '';
-    items.slice().reverse().forEach((b) => {
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.innerHTML = `
-        <div class="row-icon star"></div>
-        <div class="row-main">
-          <div class="row-title">${escapeHtml(b.title || b.url)}</div>
-          <div class="row-sub">${escapeHtml(b.url)}</div>
-        </div>
-        <div class="row-x" title="Quitar">&#10005;</div>`;
-      row.addEventListener('click', () => ipc('navigate', { url: b.url }));
-      row.querySelector('.row-x').addEventListener('click', (e) => {
-        e.stopPropagation();
-        ipc('remove_bookmark', { url: b.url });
-      });
-      el.appendChild(row);
+    let lastDay = null;
+    items.slice(0, historyLimit).forEach((h) => {
+      const day = dayLabel(h.time);
+      if (day !== lastDay) { historyEl.appendChild(el('div', 'day', day)); lastDay = day; }
+      const row = el('div', 'row');
+      row.title = h.url;
+      row.addEventListener('click', () => ipc('navigate', { url: h.url }));
+      row.appendChild(favicon(h.icon));
+      const main = el('div', 'row-main');
+      main.appendChild(el('div', 'row-title', h.title || shortUrl(h.url)));
+      main.appendChild(el('div', 'row-sub', shortUrl(h.url)));
+      row.appendChild(main);
+      if (h.time) row.appendChild(el('div', 'row-time', timeFmt.format(new Date(h.time * 1000))));
+      const acts = el('div', 'row-acts');
+      acts.appendChild(action('del', 'Quitar del historial', '&#10005;', () => ipc('remove_history', { url: h.url })));
+      row.appendChild(acts);
+      historyEl.appendChild(row);
     });
+    moreEl.hidden = items.length <= historyLimit;
+  }
+
+  window.onHistory = function (data) {
+    historyData = data;
+    renderHistory();
   };
 
-  window.onHistory = function (items) {
-    const el = document.getElementById('history');
-    if (!items.length) { el.innerHTML = '<div class="empty">Sin paginas visitadas</div>'; return; }
-    el.innerHTML = '';
-    items.slice().reverse().slice(0, 40).forEach((h) => {
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.addEventListener('click', () => ipc('navigate', { url: h.url }));
-      row.innerHTML = `
-        <div class="row-icon"></div>
-        <div class="row-main">
-          <div class="row-title">${escapeHtml(h.title || h.url)}</div>
-          <div class="row-sub">${escapeHtml(h.url)}</div>
-        </div>`;
-      el.appendChild(row);
+  // ------------------------------------------------------------------
+  // Marcadores: carpetas, editar, mover de carpeta.
+  // ------------------------------------------------------------------
+  const bookmarksEl = document.getElementById('bookmarks');
+  let bookmarksData = { items: [], folders: [] };
+  // Lo que se esta editando: { kind: 'bookmark', url } | { kind: 'folder', name } | { kind: 'new-folder' }.
+  let editing = null;
+
+  // Que carpetas estan abiertas (se recuerda en este equipo).
+  let openFolders = new Set();
+  try { openFolders = new Set(JSON.parse(localStorage.getItem('michi.openFolders') || '[]')); } catch (e) {}
+  function saveOpen() { try { localStorage.setItem('michi.openFolders', JSON.stringify([...openFolders])); } catch (e) {} }
+
+  document.getElementById('new-folder').addEventListener('click', () => { editing = { kind: 'new-folder' }; renderBookmarks(); });
+
+  function field(label, input) {
+    const f = el('div', 'field');
+    f.appendChild(el('label', null, label));
+    f.appendChild(input);
+    return f;
+  }
+
+  function textInput(value, placeholder) {
+    const i = document.createElement('input');
+    i.type = 'text';
+    i.value = value || '';
+    i.placeholder = placeholder || '';
+    i.spellcheck = false;
+    i.autocomplete = 'off';
+    return i;
+  }
+
+  // Formulario en linea; `fields` son los inputs, `onSave` devuelve un error o nada.
+  function form(fields, saveLabel, onSave) {
+    const f = el('div', 'form');
+    fields.forEach((x) => f.appendChild(x));
+    const err = el('div', 'form-err');
+    f.appendChild(err);
+    const btns = el('div', 'form-btns');
+    const cancel = el('button', 'btn-sm', 'Cancelar');
+    const save = el('button', 'btn-sm primary', saveLabel);
+    cancel.addEventListener('click', stopEditing);
+    save.addEventListener('click', () => { const e = onSave(); if (e) err.textContent = e; else stopEditing(); });
+    btns.appendChild(cancel);
+    btns.appendChild(save);
+    f.appendChild(btns);
+    f.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); stopEditing(); }
+      if (e.key === 'Enter') { e.preventDefault(); save.click(); }
     });
+    return f;
+  }
+
+  function stopEditing() {
+    editing = null;
+    ipc('editing_left', { value: false });
+    renderBookmarks();
+  }
+
+  function folderSelect(current) {
+    const sel = document.createElement('select');
+    sel.add(new Option('Sin carpeta', ''));
+    bookmarksData.folders.forEach((f) => sel.add(new Option(f, f)));
+    sel.add(new Option('Nueva carpeta...', '__new__'));
+    sel.value = current || '';
+    return sel;
+  }
+
+  function bookmarkRow(b) {
+    if (editing && editing.kind === 'bookmark' && editing.url === b.url) {
+      const name = textInput(b.title, 'Nombre');
+      const url = textInput(b.url, 'https://...');
+      const sel = folderSelect(b.folder);
+      const newName = textInput('', 'Nombre de la carpeta nueva');
+      const newField = field('Carpeta nueva', newName);
+      newField.hidden = true;
+      sel.addEventListener('change', () => { newField.hidden = sel.value !== '__new__'; if (!newField.hidden) newName.focus(); });
+      const f = form([field('Nombre', name), field('Dirección', url), field('Carpeta', sel), newField], 'Guardar', () => {
+        if (!url.value.trim()) return 'Falta la dirección';
+        const folder = sel.value === '__new__' ? newName.value.trim() : sel.value;
+        if (sel.value === '__new__' && !folder) return 'Ponle un nombre a la carpeta nueva';
+        ipc('update_bookmark', { url: b.url, title: name.value, new_url: url.value, folder: folder });
+        if (folder) openFolders.add(folder);
+        saveOpen();
+      });
+      setTimeout(() => { name.focus(); name.select(); }, 0);
+      return f;
+    }
+    const row = el('div', 'row');
+    row.title = b.url;
+    row.addEventListener('click', () => ipc('navigate', { url: b.url }));
+    row.appendChild(favicon(b.icon, 'star'));
+    const main = el('div', 'row-main');
+    main.appendChild(el('div', 'row-title', b.title || shortUrl(b.url)));
+    main.appendChild(el('div', 'row-sub', shortUrl(b.url)));
+    row.appendChild(main);
+    const acts = el('div', 'row-acts');
+    acts.appendChild(action('', 'Editar', PENCIL, () => { editing = { kind: 'bookmark', url: b.url }; renderBookmarks(); }));
+    acts.appendChild(action('del', 'Quitar', '&#10005;', () => ipc('remove_bookmark', { url: b.url })));
+    row.appendChild(acts);
+    return row;
+  }
+
+  function folderBlock(name, items) {
+    const wrap = el('div');
+    if (editing && editing.kind === 'folder' && editing.name === name) {
+      const input = textInput(name, 'Nombre');
+      wrap.appendChild(form([field('Nombre de la carpeta', input)], 'Guardar', () => {
+        const to = input.value.trim();
+        if (!to) return 'Ponle un nombre';
+        if (openFolders.delete(name)) openFolders.add(to);
+        saveOpen();
+        ipc('rename_folder', { from: name, to: to });
+      }));
+      setTimeout(() => { input.focus(); input.select(); }, 0);
+    } else {
+      const open = openFolders.has(name);
+      const head = el('div', 'folder' + (open ? ' open' : ''));
+      head.innerHTML = CHEV + FOLDER;
+      head.appendChild(el('div', 'name', name));
+      head.appendChild(el('div', 'count', String(items.length)));
+      const acts = el('div', 'row-acts');
+      acts.appendChild(action('', 'Cambiar el nombre', PENCIL, () => { editing = { kind: 'folder', name }; renderBookmarks(); }));
+      acts.appendChild(action('del', 'Quitar la carpeta (sus marcadores quedan sueltos)', '&#10005;', () => ipc('remove_folder', { name })));
+      head.appendChild(acts);
+      head.addEventListener('click', () => {
+        if (openFolders.has(name)) openFolders.delete(name); else openFolders.add(name);
+        saveOpen();
+        renderBookmarks();
+      });
+      wrap.appendChild(head);
+    }
+    const inner = el('div', 'folder-items');
+    inner.hidden = !openFolders.has(name);
+    if (!items.length) inner.appendChild(el('div', 'empty', 'Vacía. Edita un marcador (el lápiz) para moverlo aquí.'));
+    items.forEach((b) => inner.appendChild(bookmarkRow(b)));
+    wrap.appendChild(inner);
+    return wrap;
+  }
+
+  function renderBookmarks() {
+    const { items, folders } = bookmarksData;
+    bookmarksEl.innerHTML = '';
+    if (editing && editing.kind === 'new-folder') {
+      const input = textInput('', 'Nombre');
+      bookmarksEl.appendChild(form([field('Carpeta nueva', input)], 'Crear', () => {
+        const name = input.value.trim();
+        if (!name) return 'Ponle un nombre';
+        openFolders.add(name);
+        saveOpen();
+        ipc('add_folder', { name });
+      }));
+      setTimeout(() => input.focus(), 0);
+    }
+    if (!items.length && !folders.length) {
+      bookmarksEl.appendChild(el('div', 'empty', 'Toca la estrella de la barra de direcciones (o Ctrl+D) para guardar una página'));
+      return;
+    }
+    // Los mas nuevos arriba, como siempre.
+    const newest = items.slice().reverse();
+    folders.forEach((f) => bookmarksEl.appendChild(folderBlock(f, newest.filter((b) => b.folder === f))));
+    newest.filter((b) => !b.folder).forEach((b) => bookmarksEl.appendChild(bookmarkRow(b)));
+  }
+
+  window.onBookmarks = function (data) {
+    bookmarksData = data;
+    // Si lo que se editaba ya no existe (se borro desde otro lado), se suelta.
+    if (editing && editing.kind === 'bookmark' && !data.items.some((b) => b.url === editing.url)) editing = null;
+    if (editing && editing.kind === 'folder' && !data.folders.includes(editing.name)) editing = null;
+    // Con un formulario abierto no se redibuja (se perderia lo escrito).
+    if (editing && document.activeElement && document.activeElement.closest('.form')) return;
+    renderBookmarks();
   };
 
   function escapeHtml(s) {

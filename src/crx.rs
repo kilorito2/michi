@@ -42,7 +42,7 @@ pub fn is_crx(bytes: &[u8]) -> bool {
 }
 
 pub fn verify(bytes: &[u8]) -> Result<Package<'_>, String> {
-    let damaged = || "Archivo .crx danado.".to_string();
+    let damaged = || "Archivo .crx dañado.".to_string();
     let invalid = || "La firma del .crx no es valida: el archivo fue modificado o no es el original.".to_string();
 
     if !is_crx(bytes) {
@@ -51,7 +51,7 @@ pub fn verify(bytes: &[u8]) -> Result<Package<'_>, String> {
     let version = u32_le(bytes, 4).ok_or_else(damaged)?;
     if version != 3 {
         return Err(format!(
-            "Formato .crx no soportado (version {version}): solo se aceptan paquetes CRX3 firmados."
+            "Formato .crx no soportado (versión {version}): solo se aceptan paquetes CRX3 firmados."
         ));
     }
     let header_len = u32_le(bytes, 8).ok_or_else(damaged)? as usize;
@@ -72,7 +72,7 @@ pub fn verify(bytes: &[u8]) -> Result<Package<'_>, String> {
             _ => {}
         }
     }
-    let signed_data = signed_data.ok_or("El .crx no declara el id de la extension.")?;
+    let signed_data = signed_data.ok_or("El .crx no declara el id de la extensión.")?;
     let crx_id = fields(signed_data)
         .ok_or_else(damaged)?
         .into_iter()
@@ -109,7 +109,7 @@ pub fn verify(bytes: &[u8]) -> Result<Package<'_>, String> {
         .chain(&ecdsa)
         .any(|p| digest(&SHA256, p.key).as_ref()[..16] == *crx_id);
     if !developer_key {
-        return Err("La firma del .crx no corresponde a la extension que dice ser.".into());
+        return Err("La firma del .crx no corresponde a la extensión que dice ser.".into());
     }
     Ok(Package { id: encode_id(crx_id), archive })
 }
@@ -312,7 +312,7 @@ mod tests {
         let mut crx2 = b"Cr24".to_vec();
         crx2.extend(2u32.to_le_bytes());
         crx2.extend([0; 8]);
-        assert!(verify(&crx2).unwrap_err().contains("version 2"));
+        assert!(verify(&crx2).unwrap_err().contains("versión 2"));
         assert!(verify(b"PK\x03\x04").is_err());
         assert!(verify(b"Cr24").is_err());
 

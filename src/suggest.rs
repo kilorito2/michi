@@ -108,7 +108,7 @@ pub struct Favicons {
 }
 
 impl Favicons {
-    fn get(&self, url: &str) -> Option<String> {
+    pub fn get(&self, url: &str) -> Option<String> {
         let (_, host) = split_url(url)?;
         self.icons.get(bare(&host)).map(|(_, icon)| icon.clone())
     }
@@ -146,7 +146,7 @@ pub struct Suggest {
     rect: (f64, f64),
     /// Numero del ultimo pedido: una respuesta del buscador vieja se descarta.
     seq: Arc<AtomicU64>,
-    favicons: Favicons,
+    pub favicons: Favicons,
 }
 
 impl Suggest {
@@ -418,7 +418,7 @@ fn rebuild(st: &mut AppState, visits: &[Visit]) {
                 detail: if search {
                     format!("Buscar con {}", storage::engine(&engine_id).1)
                 } else {
-                    "Ir a esta direccion".into()
+                    "Ir a esta dirección".into()
                 },
                 icon: None,
                 header: None,
@@ -809,7 +809,7 @@ fn dedupe_key(url: &str) -> String {
 }
 
 /// Minusculas y sin acentos, para comparar ("Cancion" encuentra "Canción").
-fn fold(s: &str) -> String {
+pub fn fold(s: &str) -> String {
     s.to_lowercase()
         .chars()
         .map(|c| match c {
@@ -830,7 +830,7 @@ mod tests {
     use super::*;
 
     fn h(title: &str, url: &str) -> HistoryEntry {
-        HistoryEntry { title: title.into(), url: url.into() }
+        HistoryEntry { title: title.into(), url: url.into(), time: 0 }
     }
 
     #[test]

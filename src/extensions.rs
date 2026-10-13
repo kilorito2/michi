@@ -56,7 +56,7 @@ const MAX_CRX: u64 = 100 * 1024 * 1024;
 /// pocos KB puede "inflarse" hasta llenar el disco (zip bomba).
 const MAX_UNPACKED: u64 = 512 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
-const CANCELLED: &str = "Instalacion cancelada.";
+const CANCELLED: &str = "Instalación cancelada.";
 
 pub fn extensions_dir() -> PathBuf {
     storage::data_dir().join("extensions")
@@ -161,7 +161,7 @@ fn crx_url(store: Store, id: &str) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn install_from_store(state: &Shared, store: Store, id: String) {
-    set_status(state, "Descargando extension...");
+    set_status(state, "Descargando extensión...");
     let proxy = state.borrow().proxy.clone();
     std::thread::spawn(move || {
         let origin = match store {
@@ -171,7 +171,7 @@ pub fn install_from_store(state: &Shared, store: Store, id: String) {
         let result = download(&crx_url(store, &id)).and_then(|bytes| {
             let package = crx::verify(&bytes)?;
             if package.id != id {
-                return Err("La tienda entrego una extension distinta de la pedida: no se instalo.".into());
+                return Err("La tienda entregó una extensión distinta de la pedida: no se instaló.".into());
             }
             let staged = Staged::unpack(package.archive)?;
             staged.confirm(origin)?;
@@ -187,8 +187,8 @@ pub fn install_from_file(state: &Shared) {
     std::thread::spawn(move || {
         let Some(file) = rfd::FileDialog::new()
             .set_parent(&crate::win::Owner)
-            .set_title("Instalar extension")
-            .add_filter("Extension (.crx, .zip)", &["crx", "zip"])
+            .set_title("Instalar extensión")
+            .add_filter("Extensión (.crx, .zip)", &["crx", "zip"])
             .pick_file()
         else {
             return;
@@ -212,11 +212,11 @@ pub fn install_from_file(state: &Shared) {
 pub fn install_from_folder(state: &Shared) {
     let proxy = state.borrow().proxy.clone();
     std::thread::spawn(move || {
-        let Some(dir) = rfd::FileDialog::new().set_parent(&crate::win::Owner).set_title("Carpeta de la extension").pick_folder() else {
+        let Some(dir) = rfd::FileDialog::new().set_parent(&crate::win::Owner).set_title("Carpeta de la extensión").pick_folder() else {
             return;
         };
         let result = if !dir.join("manifest.json").is_file() {
-            Err("Esa carpeta no tiene un manifest.json: no es una extension desempaquetada.".into())
+            Err("Esa carpeta no tiene un manifest.json: no es una extensión desempaquetada.".into())
         } else if confirm_install(&dir, "carpeta descomprimida SIN FIRMA (para desarrolladores)") {
             Ok(dir)
         } else {
@@ -295,9 +295,9 @@ fn confirm_install(root: &Path, origin: &str) -> bool {
         .get("name")
         .and_then(Value::as_str)
         .map(|n| localize(root, &manifest, n))
-        .unwrap_or_else(|| "esta extension".into());
+        .unwrap_or_else(|| "esta extensión".into());
     let warnings = permission_warnings(&manifest);
-    let mut text = format!("Agregar \"{name}\"?\n\nOrigen: {origin}.\n\n");
+    let mut text = format!("¿Agregar \"{name}\"?\n\nOrigen: {origin}.\n\n");
     if warnings.is_empty() {
         text.push_str("No pide permisos especiales.");
     } else {
@@ -309,7 +309,7 @@ fn confirm_install(root: &Path, origin: &str) -> bool {
     rfd::MessageDialog::new()
         .set_parent(&crate::win::Owner)
         .set_level(rfd::MessageLevel::Warning)
-        .set_title("Agregar extension")
+        .set_title("Agregar extensión")
         .set_description(text)
         .set_buttons(rfd::MessageButtons::YesNo)
         .show()
@@ -321,25 +321,25 @@ fn confirm_install(root: &Path, origin: &str) -> bool {
 /// peligroso primero.
 fn permission_warnings(manifest: &Value) -> Vec<String> {
     const APIS: &[(&str, &str)] = &[
-        ("debugger", "Controlar las paginas con el depurador (ver y cambiar todo lo que hacen)"),
+        ("debugger", "Controlar las páginas con el depurador (ver y cambiar todo lo que hacen)"),
         ("nativeMessaging", "Comunicarse con programas instalados en el equipo"),
-        ("proxy", "Cambiar el proxy (puede ver o desviar todo tu trafico)"),
+        ("proxy", "Cambiar el proxy (puede ver o desviar todo tu tráfico)"),
         ("management", "Administrar tus otras extensiones"),
-        ("privacy", "Cambiar tu configuracion de privacidad"),
-        ("contentSettings", "Cambiar lo que pueden hacer los sitios (camara, microfono, JavaScript...)"),
-        ("history", "Leer y cambiar tu historial de navegacion"),
-        ("tabs", "Ver la direccion de todas tus pestanas"),
-        ("webNavigation", "Ver la direccion de todas tus pestanas"),
+        ("privacy", "Cambiar tu configuración de privacidad"),
+        ("contentSettings", "Cambiar lo que pueden hacer los sitios (cámara, micrófono, JavaScript...)"),
+        ("history", "Leer y cambiar tu historial de navegación"),
+        ("tabs", "Ver la dirección de todas tus pestañas"),
+        ("webNavigation", "Ver la dirección de todas tus pestañas"),
         ("bookmarks", "Leer y cambiar tus marcadores"),
         ("downloads", "Administrar tus descargas"),
         ("desktopCapture", "Capturar lo que se ve en tu pantalla"),
-        ("tabCapture", "Capturar el contenido de tus pestanas"),
+        ("tabCapture", "Capturar el contenido de tus pestañas"),
         ("clipboardRead", "Leer lo que copias"),
         ("clipboardWrite", "Cambiar lo que copias y pegas"),
-        ("geolocation", "Saber tu ubicacion"),
-        ("topSites", "Ver tus sitios mas visitados"),
-        ("declarativeNetRequest", "Bloquear o cambiar contenido de las paginas"),
-        ("webRequestBlocking", "Bloquear o cambiar contenido de las paginas"),
+        ("geolocation", "Saber tu ubicación"),
+        ("topSites", "Ver tus sitios más visitados"),
+        ("declarativeNetRequest", "Bloquear o cambiar contenido de las páginas"),
+        ("webRequestBlocking", "Bloquear o cambiar contenido de las páginas"),
         ("notifications", "Mostrar notificaciones"),
     ];
     let strings = |v: Option<&Value>| -> Vec<String> {
@@ -371,7 +371,7 @@ fn permission_warnings(manifest: &Value) -> Vec<String> {
             let shown = names.iter().take(3).copied().collect::<Vec<_>>().join(", ");
             out.push(match names.len().saturating_sub(3) {
                 0 => format!("Leer y cambiar tus datos en {shown}"),
-                more => format!("Leer y cambiar tus datos en {shown} y {more} sitios mas"),
+                more => format!("Leer y cambiar tus datos en {shown} y {more} sitios más"),
             });
         }
     }
@@ -408,13 +408,13 @@ fn download(url: &str) -> Result<Vec<u8>, String> {
     let response = agent
         .get(url)
         .call()
-        .map_err(|e| format!("No se pudo descargar la extension ({e})."))?;
+        .map_err(|e| format!("No se pudo descargar la extensión ({e})."))?;
     let mut bytes = Vec::new();
     response
         .into_reader()
         .take(MAX_CRX)
         .read_to_end(&mut bytes)
-        .map_err(|e| format!("Fallo la descarga ({e})."))?;
+        .map_err(|e| format!("Falló la descarga ({e})."))?;
     Ok(bytes)
 }
 
@@ -426,9 +426,9 @@ fn unpack(zip_bytes: &[u8], dest: &Path) -> Result<PathBuf, String> {
 }
 
 fn unpack_limited(zip_bytes: &[u8], dest: &Path, max_bytes: u64) -> Result<PathBuf, String> {
-    let too_big = || "La extension descomprimida es demasiado grande.".to_string();
+    let too_big = || "La extensión descomprimida es demasiado grande.".to_string();
     let mut archive =
-        zip::ZipArchive::new(Cursor::new(zip_bytes)).map_err(|e| format!("No es una extension valida ({e})."))?;
+        zip::ZipArchive::new(Cursor::new(zip_bytes)).map_err(|e| format!("No es una extensión valida ({e})."))?;
     if archive.len() > MAX_FILES {
         return Err(too_big());
     }
@@ -467,7 +467,7 @@ fn unpack_limited(zip_bytes: &[u8], dest: &Path, max_bytes: u64) -> Result<PathB
             .map_err(|e| e.to_string())?
             .filter_map(|e| e.ok().map(|e| e.path()))
             .find(|p| p.join("manifest.json").is_file())
-            .ok_or("El archivo no tiene un manifest.json: no es una extension.")?
+            .ok_or("El archivo no tiene un manifest.json: no es una extensión.")?
     };
     // Chromium se niega a cargar una extension desempaquetada con carpetas
     // que empiezan con "_" que no conoce; "_metadata" (las firmas de la
@@ -493,18 +493,18 @@ pub fn install_dir(state: &Shared, dir: PathBuf) {
                     reg.insert(id, path);
                     save_registry(&reg);
                 }
-                set_status(&s, &format!("Extension instalada: {name}"));
+                set_status(&s, &format!("Extensión instalada: {name}"));
             }
             (Err(err), _) => {
-                set_status(&s, &format!("No se pudo instalar la extension ({}).", err.message()));
+                set_status(&s, &format!("No se pudo instalar la extensión ({}).", err.message()));
             }
-            (Ok(()), None) => set_status(&s, "No se pudo instalar la extension."),
+            (Ok(()), None) => set_status(&s, "No se pudo instalar la extensión."),
         }
         refresh(&s);
         Ok(())
     }));
     if let Err(err) = unsafe { profile.AddBrowserExtension(&HSTRING::from(dir.as_path()), &handler) } {
-        set_status(state, &format!("No se pudo instalar la extension ({}).", err.message()));
+        set_status(state, &format!("No se pudo instalar la extensión ({}).", err.message()));
     }
 }
 
@@ -792,7 +792,7 @@ mod tests {
             vec![
                 "Leer y cambiar todos tus datos en todos los sitios web",
                 "Comunicarse con programas instalados en el equipo",
-                "Ver la direccion de todas tus pestanas",
+                "Ver la dirección de todas tus pestañas",
             ]
         );
         let some_sites = json!({
@@ -803,8 +803,8 @@ mod tests {
         assert_eq!(
             permission_warnings(&some_sites),
             vec![
-                "Leer y cambiar tus datos en a.com, b.com, github.com y 1 sitios mas",
-                "Ver la direccion de todas tus pestanas",
+                "Leer y cambiar tus datos en a.com, b.com, github.com y 1 sitios más",
+                "Ver la dirección de todas tus pestañas",
             ]
         );
         assert!(permission_warnings(&json!({ "permissions": ["storage"] })).is_empty());

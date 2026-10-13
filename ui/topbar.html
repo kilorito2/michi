@@ -162,6 +162,19 @@
   .store-btn[hidden] { display: none; }
   .menu-btn svg { width: 16px; height: 16px; fill: currentColor; }
 
+  /* Hay una version nueva (ver src/update.rs): lleva a Ajustes > Acerca de. */
+  .update-btn {
+    flex: none; height: 28px; padding: 0 11px 0 9px; border-radius: 9px; margin-right: 4px;
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-size: 12px; font-weight: 600; color: #fff;
+    background: linear-gradient(135deg, #ff7a1a, #ff4f8b); border: 1px solid rgba(255,255,255,0.25);
+    transition: filter .15s ease, transform .15s ease;
+  }
+  .update-btn:hover { filter: brightness(1.1); }
+  .update-btn:active { transform: scale(.96); }
+  .update-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .update-btn[hidden] { display: none; }
+
   /* Iconos de extensiones (ver src/popup.rs). */
   .ext-bar { display: flex; gap: 2px; flex: none; }
   .ext-bar:empty { display: none; }
@@ -174,23 +187,23 @@
 </head>
 <body>
   <div class="bar" id="bar">
-    <div class="btn" id="back" title="Atras">&#8592;</div>
+    <div class="btn" id="back" title="Atrás">&#8592;</div>
     <div class="btn" id="fwd" title="Adelante">&#8594;</div>
     <div class="btn" id="reload" title="Recargar">&#8635;</div>
 
     <div class="drag-spacer"></div>
 
     <div class="addr-wrap" id="addr">
-      <div class="incog" id="incog" hidden title="Esta pestana es de incognito: no deja historial ni cookies al cerrarla. Tu proveedor de internet y los sitios que visitas igual pueden ver lo que haces."><svg viewBox="0 0 24 24"><path d="M5 21V11a7 7 0 0 1 14 0v10l-2.4-2-2.3 2-2.3-2-2.3 2L7.4 19z"/><circle cx="9.6" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg><span>Incognito</span></div>
+      <div class="incog" id="incog" hidden title="Esta pestaña es de incógnito: no deja historial ni cookies al cerrarla. Tu proveedor de internet y los sitios que visitas igual pueden ver lo que haces."><svg viewBox="0 0 24 24"><path d="M5 21V11a7 7 0 0 1 14 0v10l-2.4-2-2.3 2-2.3-2-2.3 2L7.4 19z"/><circle cx="9.6" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg><span>Incógnito</span></div>
       <div class="sec" id="sec" data-state="internal"><span id="sec-icon"></span><span class="sec-label" id="sec-label"></span></div>
       <div class="url-box">
-        <input id="url" spellcheck="false" placeholder="Buscar o escribir una direccion web" />
+        <input id="url" spellcheck="false" placeholder="Buscar o escribir una dirección web" />
         <div class="url-view" id="url-view" aria-hidden="true"></div>
       </div>
       <div class="shield" id="shield" hidden>
         <svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6z"/><path d="m9.5 9.5 5 5M14.5 9.5l-5 5"/></svg>
       </div>
-      <button class="store-btn" id="store" hidden title="Instalar esta extension">Agregar a Michi</button>
+      <button class="store-btn" id="store" hidden title="Instalar esta extensión">Agregar a Michi</button>
       <div class="star" id="star" title="Agregar a marcadores (Ctrl+D)" hidden>
         <svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>
       </div>
@@ -198,11 +211,14 @@
 
     <div class="drag-spacer"></div>
 
+    <div class="update-btn" id="update" hidden title="Hay una versión nueva de Michi">
+      <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg><span>Actualizar</span>
+    </div>
     <div class="ext-bar" id="ext-bar"></div>
-    <div class="btn new-tab" id="new-tab" title="Nueva pestana (Ctrl+T)">
+    <div class="btn new-tab" id="new-tab" title="Nueva pestaña (Ctrl+T)">
       <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
     </div>
-    <div class="btn menu-btn" id="menu" title="Menu (Alt+F)">
+    <div class="btn menu-btn" id="menu" title="Menú (Alt+F)">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
     </div>
 
@@ -339,14 +355,14 @@
   const WARN = '<svg viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.2h.01"/></svg>';
   const SEC = {
     secure: ['<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
-      '', 'Conexion segura (HTTPS)'],
+      '', 'Conexión segura (HTTPS)'],
     insecure: [WARN, 'No seguro',
-      'La conexion con este sitio no esta cifrada (HTTP): alguien en tu red podria ver o cambiar lo que envias. No escribas contrasenas ni datos de pago.'],
+      'La conexión con este sitio no está cifrada (HTTP): alguien en tu red podría ver o cambiar lo que envías. No escribas contraseñas ni datos de pago.'],
     dangerous: [WARN, 'No seguro',
-      'El certificado de este sitio no es valido: alguien podria estar haciendose pasar por el. No escribas contrasenas ni datos de pago.'],
+      'El certificado de este sitio no es válido: alguien podría estar haciendose pasar por el. No escribas contraseñas ni datos de pago.'],
     file: ['<svg viewBox="0 0 24 24"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/></svg>', '', 'Archivo de este equipo'],
     extension: ['<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 12h6M12 9v6"/></svg>',
-      '', 'Pagina de una extension'],
+      '', 'Página de una extensión'],
     other: ['<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>', '', ''],
     internal: ['<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>', '', ''],
   };
@@ -391,11 +407,11 @@
     const lines = [];
     if (popups.length) {
       lines.push((popups.length === 1 ? 'Se bloqueo una ventana emergente' : 'Se bloquearon ' + popups.length + ' ventanas emergentes') +
-        ': ' + popups[popups.length - 1].target + '\nClic para abrir' + (popups.length === 1 ? 'la.' : ' la ultima.'));
+        ': ' + popups[popups.length - 1].target + '\nClic para abrir' + (popups.length === 1 ? 'la.' : ' la última.'));
     }
     if (apps.length) {
       const names = apps.map((a) => a.target).filter((v, i, all) => all.indexOf(v) === i);
-      lines.push('Se bloqueo un intento de abrir una aplicacion externa (' + names.join(', ') + ').');
+      lines.push('Se bloqueo un intento de abrir una aplicación externa (' + names.join(', ') + ').');
     }
     shield.title = lines.join('\n\n');
   }
@@ -437,7 +453,7 @@
     store.hidden = !data.storeExtension;
     store.disabled = busy;
     store.textContent = busy ? data.extensionStatus : 'Agregar a Michi';
-    store.title = data.extensionStatus || 'Instalar esta extension';
+    store.title = data.extensionStatus || 'Instalar esta extensión';
   };
 
   window.onExtensionToolbar = function (items) {
@@ -461,6 +477,19 @@
       });
       bar.appendChild(b);
     });
+  };
+
+  // Rust -> UI: hay (o no) una version nueva de Michi (ver src/update.rs).
+  const updateBtn = document.getElementById('update');
+  updateBtn.addEventListener('click', () => ipc('menu', { action: 'about' }));
+  window.onUpdate = function (u) {
+    const show = u.phase === 'available' || u.phase === 'downloading';
+    updateBtn.hidden = !show;
+    if (show) {
+      updateBtn.title = u.phase === 'downloading'
+        ? 'Descargando Michi ' + u.version + '... ' + Math.floor((u.progress || 0) * 100) + '%'
+        : 'Hay una versión nueva: Michi ' + u.version + '. Tócalo para verla en Ajustes.';
+    }
   };
 
   window.onMaximized = function (isMax) {

@@ -261,6 +261,32 @@ pub fn apply_smartscreen(state: &Shared) {
     }
 }
 
+/// Guardar contrasenas y completar formularios (Ajustes > Privacidad). Es de
+/// cada WebView: se aplica a cada pestana al crearla y a todas al cambiarlo.
+/// WebView2 trae las dos cosas (el globo de "Guardar contrasena?" y las
+/// sugerencias al escribir) y las guarda en el perfil, cifradas por Windows.
+fn set_autofill(state: &Shared, webview: &WebView) {
+    let st = state.borrow();
+    set_autofill_on(webview, st.settings.save_passwords, st.settings.autofill);
+}
+
+fn set_autofill_on(webview: &WebView, passwords: bool, autofill: bool) {
+    let settings4 = unsafe { webview.webview().Settings() }.and_then(|s| s.cast::<ICoreWebView2Settings4>());
+    if let Ok(s4) = settings4 {
+        unsafe {
+            let _ = s4.SetIsPasswordAutosaveEnabled(passwords);
+            let _ = s4.SetIsGeneralAutofillEnabled(autofill);
+        }
+    }
+}
+
+pub fn apply_autofill(state: &Shared) {
+    let st = state.borrow();
+    for tab in &st.tabs {
+        set_autofill_on(&tab.webview, st.settings.save_passwords, st.settings.autofill);
+    }
+}
+
 /// Ajustes > Prevencion de seguimiento (es del perfil: vale para todos).
 pub fn apply_tracking_prevention(state: &Shared) {
     let st = state.borrow();
@@ -296,6 +322,8 @@ pub fn attach_tab(state: &Shared, webview: &WebView, id: u64) {
             let _ = unsafe { settings9.SetIsNonClientRegionSupportEnabled(false) };
         }
     }
+    set_autofill(state, webview);
+
     on_navigation_starting(state, &core, id);
     on_content_loading(state, &core, id);
     on_navigation_completed(state, &core, id);
@@ -719,15 +747,16 @@ pub fn open_blocked_popup(state: &Shared) {
 // ---------------------------------------------------------------------------
 
 /// Cerrar el navegador. Con "Borrar datos al cerrar" primero se borra todo
-/// (lo de WebView2 es asincrono: se sale cuando termina, o a los
-/// QUIT_TIMEOUT si no termina).
+/// (lo de WebView2 es asincrono: se sigue cuando termina, o a los
+/// QUIT_TIMEOUT si no termina). Despues, el cierre ordenado (ver shutdown).
 pub fn quit(state: &Shared) {
     if !state.borrow().settings.clear_on_exit {
-        std::process::exit(0);
+        state.borrow_mut().request(Action::Shutdown);
+        return;
     }
     let window = {
         let mut st = state.borrow_mut();
-        if st.quit_deadline.is_some() {
+        if st.quit_deadline.is_some() || st.shutting_down {
             return;
         }
         st.quit_deadline = Some(Instant::now() + QUIT_TIMEOUT);
@@ -743,17 +772,66 @@ pub fn quit(state: &Shared) {
     if let Some(window) = window {
         window.set_visible(false);
     }
+    let s = state.clone();
     let st = state.borrow();
     match &st.topbar {
-        Some(topbar) => native::clear_browsing_data(topbar, ClearKinds { cookies: true, cache: true }, |_| {
-            std::process::exit(0)
+        Some(topbar) => native::clear_browsing_data(topbar, ClearKinds { cookies: true, cache: true, ..Default::default() }, move |_| {
+            s.borrow_mut().request(Action::Shutdown)
         }),
         None => std::process::exit(0),
     }
     st.wake();
 }
 
-/// Si ya vencio la espera de quit(): sale. Si no, cuando volver a mirar.
+/// Lo que espera el cierre ordenado a que termine WebView2 antes de salir igual.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Cierre ordenado: se guarda la sesion, se cierra cada WebView (asi
+/// WebView2 termina de escribir cookies, cache y lo que las paginas guardaron)
+/// y se sale cuando su proceso avisa que termino (BrowserProcessExited), o a
+/// los SHUTDOWN_TIMEOUT si no avisa. Antes el proceso terminaba en el acto y
+/// WebView2 se enteraba despues. Corre como Action::Shutdown: soltar un
+/// WebView dentro de un callback suyo (el boton de cerrar de la barra) lo
+/// romperia mientras se ejecuta.
+pub fn shutdown(state: &Shared) {
+    use webview2_com::BrowserProcessExitedEventHandler;
+
+    let (views, window) = {
+        let mut st = state.borrow_mut();
+        if st.shutting_down {
+            return;
+        }
+        st.shutting_down = true;
+        st.save_session();
+        st.quit_deadline = Some(Instant::now() + SHUTDOWN_TIMEOUT);
+        st.exit_env = st.topbar.as_ref().and_then(|tb| unsafe {
+            tb.webview().cast::<ICoreWebView2_2>().ok()?.Environment().ok()?.cast::<ICoreWebView2Environment5>().ok()
+        });
+        if let Some(env) = &st.exit_env {
+            let handler = BrowserProcessExitedEventHandler::create(Box::new(|_, _| std::process::exit(0)));
+            let mut token = 0i64;
+            let _ = unsafe { env.add_BrowserProcessExited(&handler, &mut token) };
+        }
+        let mut views: Vec<WebView> = std::mem::take(&mut st.tabs).into_iter().map(|t| t.webview).collect();
+        views.extend(st.ext_popup.take().map(|p| p.webview));
+        views.extend(
+            [st.topbar.take(), st.left_panel.take(), st.right_panel.take(), st.menu.take(), st.suggest.view.take()]
+                .into_iter()
+                .flatten(),
+        );
+        (views, st.window.clone())
+    };
+    // Sin prestamos vivos: ocultar la ventana y cerrar los WebView pueden
+    // disparar eventos que vuelven a pedir `state`.
+    if let Some(window) = window {
+        window.set_visible(false);
+    }
+    drop(views);
+    state.borrow().wake();
+}
+
+/// Si ya vencio la espera de quit() o del cierre ordenado: sale. Si no,
+/// cuando volver a mirar.
 pub fn quit_deadline(state: &Shared) -> Option<Instant> {
     let deadline = state.borrow().quit_deadline?;
     if Instant::now() >= deadline {
@@ -761,6 +839,7 @@ pub fn quit_deadline(state: &Shared) -> Option<Instant> {
     }
     Some(deadline)
 }
+
 
 /// Al arrancar con "Borrar datos al cerrar": si la ultima vez el navegador
 /// no llego a borrar (se corto la luz, se colgo), se borra ahora.
@@ -770,7 +849,7 @@ pub fn clear_leftovers(state: &Shared) {
         return;
     }
     if let Some(topbar) = &st.topbar {
-        native::clear_browsing_data(topbar, ClearKinds { cookies: true, cache: true }, |_| {});
+        native::clear_browsing_data(topbar, ClearKinds { cookies: true, cache: true, ..Default::default() }, |_| {});
     }
 }
 

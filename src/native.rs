@@ -30,9 +30,14 @@ pub fn zoom(webview: &WebView) -> f64 {
 }
 
 /// Que borrar en "Borrar datos de navegacion" (ver ajustes, seccion Privacidad).
+#[derive(Default)]
 pub struct ClearKinds {
     pub cookies: bool,
     pub cache: bool,
+    /// Contrasenas guardadas.
+    pub passwords: bool,
+    /// Lo guardado para completar formularios.
+    pub autofill: bool,
 }
 
 pub fn clear_browsing_data(webview: &WebView, kinds: ClearKinds, done: impl FnOnce(bool) + 'static) {
@@ -44,6 +49,13 @@ pub fn clear_browsing_data(webview: &WebView, kinds: ClearKinds, done: impl FnOn
     if kinds.cache {
         flags.0 |= COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE.0;
     }
+    if kinds.passwords {
+        flags.0 |= COREWEBVIEW2_BROWSING_DATA_KINDS_PASSWORD_AUTOSAVE.0;
+    }
+    if kinds.autofill {
+        flags.0 |= COREWEBVIEW2_BROWSING_DATA_KINDS_GENERAL_AUTOFILL.0;
+    }
+
     if flags.0 == 0 {
         return done(true);
     }

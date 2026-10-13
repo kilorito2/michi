@@ -30,7 +30,7 @@ pub const KINDS: &[(&str, &str, COREWEBVIEW2_PERMISSION_KIND)] = &[
     ("microphone", "Microfono", COREWEBVIEW2_PERMISSION_KIND_MICROPHONE),
     ("notifications", "Notificaciones", COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS),
     ("clipboardRead", "Leer el portapapeles", COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ),
-    ("multipleDownloads", "Varias descargas automaticas", COREWEBVIEW2_PERMISSION_KIND_MULTIPLE_AUTOMATIC_DOWNLOADS),
+    ("multipleDownloads", "Varias descargas automáticas", COREWEBVIEW2_PERMISSION_KIND_MULTIPLE_AUTOMATIC_DOWNLOADS),
     ("fileReadWrite", "Editar archivos y carpetas", COREWEBVIEW2_PERMISSION_KIND_FILE_READ_WRITE),
     ("midi", "Control total de dispositivos MIDI", COREWEBVIEW2_PERMISSION_KIND_MIDI_SYSTEM_EXCLUSIVE_MESSAGES),
     ("sensors", "Sensores de movimiento", COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS),
@@ -40,7 +40,7 @@ pub const KINDS: &[(&str, &str, COREWEBVIEW2_PERMISSION_KIND)] = &[
 
 /// Los que pueden aparecer guardados para un sitio pero no se bloquean en general.
 const OTHER_KINDS: &[(&str, &str, COREWEBVIEW2_PERMISSION_KIND)] = &[
-    ("autoplay", "Reproduccion automatica", COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY),
+    ("autoplay", "Reproducción automática", COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY),
     ("unknown", "Otro permiso", COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION),
 ];
 

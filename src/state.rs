@@ -1,11 +1,12 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    ICoreWebView2Controller, ICoreWebView2Deferral, ICoreWebView2Environment, ICoreWebView2NewWindowRequestedEventArgs,
+    ICoreWebView2Controller, ICoreWebView2Deferral, ICoreWebView2Environment, ICoreWebView2Environment5,
+    ICoreWebView2NewWindowRequestedEventArgs,
 };
 use winit::event_loop::EventLoopProxy;
 use winit::window::Window;
@@ -43,6 +44,9 @@ pub const SETTINGS_URL: &str = "app://localhost/settings";
 pub const INSECURE_URL: &str = "http://app.localhost/insecure";
 /// Pestana nueva, para cargarla con load_url (ver INSECURE_URL).
 pub const HOME_LOAD_URL: &str = "http://app.localhost/";
+/// "Esta pagina dejo de funcionar" (ver recovery.rs). Como INSECURE_URL: se
+/// abre con load_url en la pestana que ya existe.
+pub const CRASHED_URL: &str = "http://app.localhost/crashed";
 
 /// Si una pestana sigue mostrando nuestra propia pagina servida por el
 /// protocolo "app://" (ver src/protocol.rs). Hace falta comparar contra dos
@@ -95,6 +99,28 @@ pub struct Tab {
     pub incognito: bool,
     /// Descanso de la pestana en los modos de rendimiento (ver perf.rs).
     pub rest: crate::perf::Rest,
+    /// La pagina se cayo (ver recovery.rs): lo que mostraba, para la pagina
+    /// "dejo de funcionar" y su boton de volver a cargar.
+    pub crashed: Option<crate::recovery::Crash>,
+    /// Fijada: va arriba de todo en el panel, solo con su icono, y no se
+    /// cierra con "Cerrar las demas". Las fijadas siempre van primero en `tabs`.
+    pub pinned: bool,
+    /// Silenciada desde el panel (ICoreWebView2_8::SetIsMuted).
+    pub muted: bool,
+}
+
+impl Tab {
+    /// La direccion de verdad de la pestana: en la pagina de aviso de HTTPS o
+    /// en la de "dejo de funcionar", el sitio que esta esperando ahi (es lo
+    /// que muestra la barra y lo que se guarda en la sesion).
+    pub fn real_url(&self) -> &str {
+        let pending = match own_page_path(&self.url) {
+            Some("/insecure") => self.sec.insecure_target.as_deref(),
+            Some("/crashed") => self.crashed.as_ref().map(|c| c.url.as_str()),
+            _ => None,
+        };
+        pending.unwrap_or(&self.url)
+    }
 }
 
 /// Que esta reproduciendo una pestana.
@@ -141,6 +167,11 @@ pub enum UserEvent {
     /// Un pedido de May (u otra app del usuario) por el pipe de control: se
     /// resuelve aca, en el hilo de la interfaz (ver control.rs).
     Control(crate::control::Request),
+    /// La pagina de esa pestana no respondia y el usuario eligio volver a
+    /// cargarla (ver recovery.rs).
+    ReloadHung(u64),
+    /// Novedades de la busqueda o la descarga de una actualizacion (ver update.rs).
+    Update(crate::update::Event),
 }
 
 /// Algo que hay que hacer en la proxima vuelta del bucle de eventos (ver
@@ -181,6 +212,19 @@ pub enum Action {
     /// La pagina de una pestana (id) entro o salio de pantalla completa
     /// (ver fullscreen.rs).
     Fullscreen(u64, bool),
+    /// Cerrar Michi de forma ordenada (ver security::shutdown): suelta los
+    /// WebView, cosa que no se puede hacer dentro de sus propios callbacks.
+    Shutdown,
+}
+
+/// Una pestana pedida, esperando su vuelta del bucle (ver AppState::request_tab).
+#[derive(Debug, Clone)]
+pub struct PendingTab {
+    pub url: String,
+    pub incognito: bool,
+    /// Se abre atras, junto a la activa, sin pasar al frente (como "Abrir
+    /// enlace en una pestana nueva" en Chrome; ver context_menu.rs).
+    pub background: bool,
 }
 
 /// Una ventana que abrio una pagina con window.open(), esperando su pestana.
@@ -238,11 +282,14 @@ pub struct PanelState {
     /// Abierto desde un atajo o el menu, no acercando el cursor: no se cierra
     /// solo por tener el cursor afuera (ver panels::open_held).
     pub held: bool,
+    /// Se esta escribiendo en el (el buscador del historial, editar un
+    /// marcador): no se cierra por alejar el cursor, solo con un clic fuera.
+    pub editing: bool,
 }
 
 impl PanelState {
     fn new() -> Self {
-        Self { expanded: false, progress: 0.0, anim: None, outside_since: None, held: false }
+        Self { expanded: false, progress: 0.0, anim: None, outside_since: None, held: false, editing: false }
     }
 }
 
@@ -295,8 +342,8 @@ pub struct AppState {
 
     /// Para despertar el bucle de eventos desde un callback de WebView2.
     pub proxy: Option<EventLoopProxy<UserEvent>>,
-    /// Pestanas pedidas (URL, de incognito) que todavia no se crearon. Ver request_tab.
-    pub pending_tabs: Vec<(String, bool)>,
+    /// Pestanas pedidas que todavia no se crearon. Ver request_tab.
+    pub pending_tabs: Vec<PendingTab>,
     /// window.open() de una pagina, esperando su pestana (ver PendingWindow).
     pub pending_windows: Vec<PendingWindow>,
     /// Acciones diferidas a la proxima vuelta del bucle (ver Action).
@@ -343,6 +390,23 @@ pub struct AppState {
     /// Michi es la ventana en primer plano (y no esta minimizada). Solo se
     /// vigila con un modo de rendimiento activo (ver perf::tick).
     pub foreground: bool,
+    /// Cerrandose de forma ordenada (ver security::shutdown).
+    pub shutting_down: bool,
+    /// El entorno de WebView2 mientras se cierra Michi: avisa cuando termino
+    /// su proceso (ver security::shutdown).
+    pub exit_env: Option<ICoreWebView2Environment5>,
+    /// Lo que se esta buscando en el historial del panel izquierdo ("" = las
+    /// ultimas paginas, ver sync::push_history).
+    pub history_query: String,
+    /// Carpetas de marcadores, en orden (ver library.rs).
+    pub bookmark_folders: Vec<String>,
+    /// Zoom elegido para cada sitio (ver zoom.rs).
+    pub site_zoom: HashMap<String, f64>,
+    /// Buscar e instalar actualizaciones (ver update.rs).
+    pub update: crate::update::Status,
+    /// (pestana activa, ultima abierta atras desde ella): la proxima que se
+    /// abra atras desde esa misma va despues (ver tabs::create_tab).
+    pub background_chain: Option<(u64, u64)>,
 
     next_id: u64,
 }
@@ -386,6 +450,14 @@ impl AppState {
             wallpaper_frozen: false,
             quit_deadline: None,
             foreground: true,
+            shutting_down: false,
+            exit_env: None,
+            history_query: String::new(),
+            bookmark_folders: storage::load(storage::FOLDERS_FILE),
+            site_zoom: storage::load(storage::SITE_ZOOM_FILE),
+            update: Default::default(),
+            background_chain: None,
+
             next_id: 1,
         }
     }
@@ -431,7 +503,13 @@ impl AppState {
 
     /// Lo mismo, indicando si la pestana es de incognito.
     pub fn request_tab_in(&mut self, url: &str, incognito: bool) {
-        self.pending_tabs.push((url.to_string(), incognito));
+        self.pending_tabs.push(PendingTab { url: url.to_string(), incognito, background: false });
+        self.wake();
+    }
+
+    /// Una pestana que se abre atras, junto a la activa (sin pasar al frente).
+    pub fn request_background_tab(&mut self, url: &str, incognito: bool) {
+        self.pending_tabs.push(PendingTab { url: url.to_string(), incognito, background: true });
         self.wake();
     }
 
@@ -451,6 +529,11 @@ impl AppState {
         self.tabs.get(self.active)
     }
 
+    /// Cuantas pestanas fijadas hay (siempre son las primeras).
+    pub fn pinned_count(&self) -> usize {
+        self.tabs.iter().take_while(|t| t.pinned).count()
+    }
+
     pub fn save_settings(&self) {
         storage::save(storage::SETTINGS_FILE, &self.settings);
     }
@@ -463,6 +546,11 @@ impl AppState {
         storage::save(storage::HISTORY_FILE, &self.history);
     }
 
+    pub fn save_folders(&self) {
+        storage::save(storage::FOLDERS_FILE, &self.bookmark_folders);
+    }
+
+
     /// Guarda las pestanas abiertas (para "al iniciar: restaurar"). Nunca con
     /// "borrar datos al cerrar": la sesion es justamente lo que no tiene que
     /// quedar en el disco. Las de incognito tampoco: no se restauran.
@@ -470,11 +558,14 @@ impl AppState {
         if self.settings.clear_on_exit {
             return;
         }
-        let urls: Vec<String> = self.tabs.iter().filter(|t| !t.incognito).map(|t| t.url.clone()).collect();
+        let normal = || self.tabs.iter().filter(|t| !t.incognito);
+        let urls: Vec<String> = normal().map(|t| t.real_url().to_string()).collect();
         // Cuantas pestanas normales hay antes de la activa (si la activa es de
         // incognito, queda la normal que sigue, o la ultima).
         let before = self.tabs.iter().take(self.active).filter(|t| !t.incognito).count();
-        let session = storage::Session { active: before.min(urls.len().saturating_sub(1)), urls };
+        // Las fijadas van primero: alcanza con cuantas son.
+        let pinned = normal().filter(|t| t.pinned).count();
+        let session = storage::Session { active: before.min(urls.len().saturating_sub(1)), urls, pinned };
         storage::save(storage::SESSION_FILE, &session);
     }
 

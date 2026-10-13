@@ -107,13 +107,13 @@ fn write_discovery(pipe: &str) {
 
 fn serve(pipe: HANDLE, proxy: &EventLoopProxy<UserEvent>) {
     let response = match read_line(pipe).and_then(|raw| serde_json::from_slice::<Value>(&raw).ok()) {
-        None => error("pedido invalido"),
+        None => error("pedido inválido"),
         Some(body) => {
             let (tx, rx) = mpsc::channel();
             if proxy.send_event(UserEvent::Control(Request { body, reply: tx })).is_err() {
                 error("Michi se esta cerrando")
             } else {
-                rx.recv_timeout(REPLY_TIMEOUT).unwrap_or_else(|_| error("Michi no respondio a tiempo"))
+                rx.recv_timeout(REPLY_TIMEOUT).unwrap_or_else(|_| error("Michi no respondió a tiempo"))
             }
         }
     };
@@ -168,7 +168,7 @@ pub fn handle(state: &Shared, req: Request) {
         return;
     }
     if state.borrow().window.is_none() {
-        let _ = req.reply.send(error("Michi todavia esta arrancando"));
+        let _ = req.reply.send(error("Michi todavía está arrancando"));
         return;
     }
     let body = &req.body;
@@ -184,7 +184,7 @@ pub fn handle(state: &Shared, req: Request) {
         "open" => {
             let incognito = body.get("incognito").and_then(Value::as_bool).unwrap_or(false);
             match resolve(state, body) {
-                None => error("direccion invalida"),
+                None => error("dirección inválida"),
                 Some(url) => {
                     tabs::open_tab(state, &url, incognito);
                     if body.get("focus").and_then(Value::as_bool).unwrap_or(true) {
@@ -197,8 +197,8 @@ pub fn handle(state: &Shared, req: Request) {
         }
         "navigate" => {
             match (resolve(state, body), core_of(state, tab)) {
-                (None, _) => error("direccion invalida"),
-                (_, None) => error("no existe esa pestana"),
+                (None, _) => error("dirección inválida"),
+                (_, None) => error("no existe esa pestaña"),
                 (Some(url), Some((id, core))) => {
                     // En una pestana que ya existe, la propia va con su forma http.
                     let url = if url == HOME_URL { HOME_LOAD_URL.to_string() } else { url };
@@ -208,7 +208,7 @@ pub fn handle(state: &Shared, req: Request) {
             }
         }
         "activate" => match find(state, tab) {
-            None => error("no existe esa pestana"),
+            None => error("no existe esa pestaña"),
             Some(i) => {
                 let changed = {
                     let mut st = state.borrow_mut();
@@ -226,14 +226,14 @@ pub fn handle(state: &Shared, req: Request) {
             }
         },
         "close" => match find(state, tab).map(|i| state.borrow().tabs[i].id) {
-            None => error("no existe esa pestana"),
+            None => error("no existe esa pestaña"),
             Some(id) => {
                 tabs::close_tab(state, id);
                 ok(json!({}))
             }
         },
         "back" | "forward" | "reload" | "stop" => match core_of(state, tab) {
-            None => error("no existe esa pestana"),
+            None => error("no existe esa pestaña"),
             Some((_, core)) => {
                 let _ = unsafe {
                     match cmd {
@@ -250,8 +250,8 @@ pub fn handle(state: &Shared, req: Request) {
             let method = body.get("method").and_then(Value::as_str).unwrap_or("").to_string();
             let params = body.get("params").cloned().unwrap_or_else(|| json!({}));
             match core_of(state, tab) {
-                None => error("no existe esa pestana"),
-                Some(_) if method.is_empty() => error("falta el metodo"),
+                None => error("no existe esa pestaña"),
+                Some(_) if method.is_empty() => error("falta el método"),
                 Some((_, core)) => {
                     // La respuesta llega despues, en el callback.
                     call_cdp(&core, &method, &params, req.reply);

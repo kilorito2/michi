@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Nueva pestana</title>
+<title>Nueva pestaña</title>
 <style>
   :root{
     --glass-bg: rgba(255,255,255,0.10);
@@ -118,11 +118,11 @@
         <circle cx="11" cy="11" r="7"></circle>
         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
       </svg>
-      <input id="q" spellcheck="false" autofocus placeholder="Buscar o escribir una direccion" />
+      <input id="q" spellcheck="false" autofocus placeholder="Buscar o escribir una dirección" />
     </div>
     <div class="incog-note" id="incog-note" hidden>
-      <h2><svg viewBox="0 0 24 24"><path d="M5 21V11a7 7 0 0 1 14 0v10l-2.4-2-2.3 2-2.3-2-2.3 2L7.4 19z"/><circle cx="9.6" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg>Estas navegando en incognito</h2>
-      <p>Michi no guardara el historial, las cookies ni los datos de los sitios que visites en esta pestana: se borran al cerrarla. Las descargas y los marcadores que guardes si se conservan. Tu proveedor de internet y los sitios que visitas igual pueden ver lo que haces.</p>
+      <h2><svg viewBox="0 0 24 24"><path d="M5 21V11a7 7 0 0 1 14 0v10l-2.4-2-2.3 2-2.3-2-2.3 2L7.4 19z"/><circle cx="9.6" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="11" r="1.1" fill="currentColor" stroke="none"/></svg>Estas navegando en incógnito</h2>
+      <p>Michi no guardará el historial, las cookies ni los datos de los sitios que visites en esta pestaña: se borran al cerrarla. Las descargas y los marcadores que guardes sí se conservan. Tu proveedor de internet y los sitios que visitas igual pueden ver lo que haces.</p>
     </div>
   </div>
 
@@ -161,7 +161,7 @@
       });
     }
     var engine = d.engines.filter(function (e) { return e.id === d.settings.searchEngine; })[0];
-    input.placeholder = 'Buscar con ' + (engine ? engine.label : 'Google') + ' o escribir una direccion';
+    input.placeholder = 'Buscar con ' + (engine ? engine.label : 'Google') + ' o escribir una dirección';
     markActive();
   };
 

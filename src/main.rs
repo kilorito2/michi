@@ -21,6 +21,7 @@ mod perf;
 mod permissions;
 mod popup;
 mod protocol;
+mod recovery;
 mod security;
 mod shortcuts;
 mod single_instance;
@@ -29,7 +30,11 @@ mod storage;
 mod suggest;
 mod sync;
 mod tabs;
+mod update;
 mod win;
+mod zoom;
+mod library;
+mod context_menu;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -98,6 +103,7 @@ impl ApplicationHandler<UserEvent> for App {
         for wv in [&topbar, &left, &right, &menu, &suggestions] {
             security::harden(&self.state, wv);
             shortcuts::attach(&self.state, wv, wv_is_chrome(wv, &topbar, &left, &right));
+            recovery::attach(&self.state, wv, None);
         }
         {
             let mut st = self.state.borrow_mut();
@@ -119,6 +125,7 @@ impl ApplicationHandler<UserEvent> for App {
         sync::push_bookmarks(&self.state);
         sync::push_maximized(&self.state);
         sync::push_wallpaper(&self.state);
+        update::check_on_start(&self.state);
     }
 
     fn window_event(&mut self, _event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
@@ -162,6 +169,8 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::ImportFailed(message) => sync::push_toast(&self.state, &message),
             UserEvent::SearchSuggestions { seq, query, list } => suggest::on_engine(&self.state, seq, query, list),
             UserEvent::Control(request) => control::handle(&self.state, request),
+            UserEvent::ReloadHung(id) => recovery::reload_hung(&self.state, id),
+            UserEvent::Update(event) => update::on_event(&self.state, event),
             UserEvent::OpenExternal(url) => {
                 win::bring_to_front();
                 if let Some(url) = url.filter(|u| single_instance::is_external_target(u)) {
@@ -190,8 +199,8 @@ impl ApplicationHandler<UserEvent> for App {
             let mut st = self.state.borrow_mut();
             (!st.pending_tabs.is_empty()).then(|| st.pending_tabs.remove(0))
         };
-        if let Some((url, incognito)) = next_tab {
-            tabs::open_tab(&self.state, &url, incognito);
+        if let Some(pending) = next_tab {
+            tabs::open_pending(&self.state, pending);
             if !self.state.borrow().pending_tabs.is_empty() {
                 self.state.borrow().wake();
             }
@@ -212,7 +221,8 @@ impl ApplicationHandler<UserEvent> for App {
         let popup = popup::watch(&self.state);
         let quit = security::quit_deadline(&self.state);
         let perf = perf::tick(&self.state);
-        match panels.into_iter().chain(menu).chain(popup).chain(https).chain(quit).chain(perf).min() {
+        let update = update::tick(&self.state);
+        match panels.into_iter().chain(menu).chain(popup).chain(https).chain(quit).chain(perf).chain(update).min() {
             Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }
@@ -243,10 +253,12 @@ fn with_app_icon(attrs: winit::window::WindowAttributes) -> winit::window::Windo
 
 /// "Al iniciar" (ajustes): una pestana nueva, o las de la ultima sesion
 /// (nunca con "borrar datos al cerrar": no deberia haber sesion guardada).
+/// Despues de que se cayo WebView2 (ver recovery.rs) siempre se restaura: es
+/// el mismo Michi que se estaba usando, que se volvio a abrir.
 fn open_startup_tabs(state: &Shared) {
     let restore = {
         let st = state.borrow();
-        st.settings.startup == "restore" && !st.settings.clear_on_exit
+        (st.settings.startup == "restore" || recovery::is_recovering()) && !st.settings.clear_on_exit
     };
     let session: storage::Session = if restore { storage::load(storage::SESSION_FILE) } else { Default::default() };
     let requested = url_from_args();
@@ -254,8 +266,13 @@ fn open_startup_tabs(state: &Shared) {
         tabs::open_tab(state, requested.as_deref().unwrap_or(HOME_URL), false);
         return;
     }
-    for url in &session.urls {
+    for (i, url) in session.urls.iter().enumerate() {
         tabs::open_tab(state, url, false);
+        if i < session.pinned {
+            if let Some(tab) = state.borrow_mut().tabs.last_mut() {
+                tab.pinned = true;
+            }
+        }
     }
     // Lo pedido al abrir (un enlace de otra aplicacion) queda al frente.
     if let Some(url) = requested {
@@ -316,8 +333,10 @@ fn install_crash_log() {
 }
 
 fn main() {
+    recovery::mark_start();
     // Antes que nada: que ninguna DLL se cargue desde un lugar inseguro.
     security::harden_process();
+
     // Si ya hay un Michi abierto, el enlace o archivo pedido va a una pestana
     // de ese y este proceso termina aca, sin abrir otra ventana.
     if !single_instance::claim(url_from_args().as_deref()) {

@@ -96,17 +96,20 @@ fn run(state: &Shared, action: Action) {
             }
         }
         Action::Zoom(step) => {
-            {
+            let (id, target) = {
                 let st = state.borrow();
                 let Some(t) = st.active_tab() else { return };
                 let current = native::zoom(&t.webview);
                 let target = match step {
-                    0 => 1.0,
+                    0 => st.settings.default_zoom,
                     s if s > 0 => ZOOM_STEPS.iter().copied().find(|z| *z > current + 0.001).unwrap_or(5.0),
                     _ => ZOOM_STEPS.iter().rev().copied().find(|z| *z < current - 0.001).unwrap_or(0.25),
                 };
                 let _ = t.webview.zoom(target);
-            }
+                (t.id, target)
+            };
+            // Queda recordado para el sitio (ver zoom.rs).
+            crate::zoom::remember(state, id, target);
             sync::push_menu(state);
         }
         Action::ToggleMenu => menu::toggle(state),
@@ -123,6 +126,7 @@ fn run(state: &Shared, action: Action) {
         }
         Action::CloseTab(id) => tabs::close_tab(state, id),
         Action::Fullscreen(id, on) => fullscreen::set(state, id, on),
+        Action::Shutdown => crate::security::shutdown(state),
     }
 }
 
@@ -139,7 +143,8 @@ pub fn toggle_bookmark(state: &Shared) {
             st.bookmarks.remove(i);
         } else {
             let title = if title.is_empty() { url.clone() } else { title };
-            st.bookmarks.push(Bookmark { title, url });
+            st.bookmarks.push(Bookmark { title, url, folder: String::new() });
+
         }
         st.save_bookmarks();
     }

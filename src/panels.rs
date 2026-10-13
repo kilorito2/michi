@@ -57,6 +57,7 @@ pub fn set_expanded(state: &Shared, side: Side, value: bool) {
         p.outside_since = None;
         if !value {
             p.held = false;
+            p.editing = false;
         }
         if p.expanded == value {
             false
@@ -95,6 +96,14 @@ pub fn open_held(state: &Shared, side: Side) {
     let mut st = state.borrow_mut();
     let p = st.panel_mut(side);
     p.held = p.expanded;
+}
+
+/// La pagina del panel avisa que se empezo (o se dejo) de escribir en el.
+pub fn set_editing(state: &Shared, side: Side, value: bool) {
+    let mut st = state.borrow_mut();
+    let p = st.panel_mut(side);
+    p.editing = value && p.expanded;
+    p.outside_since = None;
 }
 
 /// Cierra un panel de golpe, sin animacion: al entrar en pantalla completa
@@ -181,6 +190,12 @@ fn watch_cursor(state: &Shared) {
                 Side::Right => x >= win_w - PANEL_W && x < win_w,
             };
             let inside = in_x && y >= TOPBAR_H && y < win_h;
+            if p.editing {
+                if !inside && button_down {
+                    to_close.push(side);
+                }
+                continue;
+            }
             if p.held {
                 if inside {
                     p.held = false;

@@ -24,8 +24,10 @@ use crate::native::ClearKinds;
 use crate::state::{is_own_page, own_page_path, Action, Shared, Side, UserEvent, HOME_LOAD_URL, HOME_URL};
 use crate::storage::{self, Settings};
 use crate::{
-    actions, downloads, extensions, import, menu, native, panels, perf, permissions, protocol, security, suggest, sync,
+    actions, downloads, extensions, import, library, menu, native, panels, perf, permissions, protocol, security, suggest,
+    sync,
     tabs,
+
 };
 
 #[derive(Deserialize, Debug)]
@@ -43,11 +45,20 @@ pub enum Command {
     NewIncognitoTab,
     CloseTab { id: u64 },
     SwitchTab { id: u64 },
+    /// Panel de pestanas: arrastrar, el menu del clic derecho y el altavoz.
+    MoveTab { id: u64, to: usize },
+    PinTab { id: u64, pinned: bool },
+    MuteTab { id: u64, muted: bool },
+    DuplicateTab { id: u64 },
+    CloseOtherTabs { id: u64 },
+    ReloadTab { id: u64 },
     DragWindow,
     Minimize,
     ToggleMaximize,
     Close,
     ExpandLeft { value: bool },
+    /// Se esta escribiendo en el panel izquierdo (ver panels::set_editing).
+    EditingLeft { value: bool },
     ExpandRight { value: bool },
     OpenDownloadsFolder,
     /// Muestra un archivo descargado en el Explorador (seleccionado).
@@ -55,8 +66,16 @@ pub enum Command {
     /// "pause" | "resume" | "cancel" (ver downloads::control).
     DownloadControl { id: u64, action: String },
     ClearHistory,
+    /// Buscador del historial del panel ("" = las ultimas; ver library.rs).
+    HistorySearch { q: String },
+    RemoveHistory { url: String },
     ToggleBookmark,
     RemoveBookmark { url: String },
+    /// Editar un marcador: nombre, direccion y carpeta (ver library.rs).
+    UpdateBookmark { url: String, title: String, new_url: String, folder: String },
+    AddFolder { name: String },
+    RenameFolder { from: String, to: String },
+    RemoveFolder { name: String },
     /// Acciones del menu "..." y atajos equivalentes.
     Menu { action: String },
     ToggleMenu,
@@ -90,7 +109,23 @@ pub enum Command {
     SetSetting { key: String, value: Value },
     ResetSettings,
     PickDownloadsDir,
-    ClearData { history: bool, cookies: bool, cache: bool, downloads: bool },
+    ClearData {
+        history: bool,
+        cookies: bool,
+        cache: bool,
+        downloads: bool,
+        #[serde(default)]
+        passwords: bool,
+        #[serde(default)]
+        autofill: bool,
+    },
+    /// Olvidar el zoom elegido para cada sitio (ver zoom.rs).
+    ClearSiteZoom,
+    /// Ajustes > Acerca de: buscar una version nueva, o instalarla (ver update.rs).
+    UpdateCheck,
+    UpdateInstall,
+    /// Pagina "dejo de funcionar": volver a cargar el sitio (ver recovery.rs).
+    CrashedReload,
     ExtInstallFile,
     ExtInstallFolder,
     ExtEnable { id: String, enabled: bool },
@@ -141,7 +176,12 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
         Command::NavigateInput { input } => navigate_input(state, &input),
         Command::Back => with_active(state, |w| { let _ = w.go_back(); }),
         Command::Forward => with_active(state, |w| { let _ = w.go_forward(); }),
-        Command::Reload => with_active(state, |w| { let _ = w.reload(); }),
+        Command::Reload => {
+            let id = state.borrow().active_tab().map(|t| t.id);
+            if let Some(id) = id {
+                tabs::reload(state, id);
+            }
+        }
         Command::NewTab => state.borrow_mut().request_tab(HOME_URL),
         Command::NewIncognitoTab => state.borrow_mut().request_tab_in(HOME_URL, true),
         Command::CloseTab { id } => tabs::close_tab(state, id),
@@ -154,6 +194,12 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
             }
             tabs::activated(state);
         }
+        Command::MoveTab { id, to } => tabs::move_tab(state, id, to),
+        Command::PinTab { id, pinned } => tabs::set_pinned(state, id, pinned),
+        Command::MuteTab { id, muted } => tabs::set_muted(state, id, muted),
+        Command::DuplicateTab { id } => tabs::duplicate(state, id),
+        Command::CloseOtherTabs { id } => tabs::close_others(state, id),
+        Command::ReloadTab { id } => tabs::reload(state, id),
         // La ventana se clona y el prestamo de `state` se suelta ANTES de
         // tocarla: maximizar/minimizar disparan el Resized de winit en el
         // acto (dentro de esta llamada), y arrastrar corre un bucle modal de
@@ -178,6 +224,7 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
         }
         Command::Close => security::quit(state),
         Command::ExpandLeft { value } => panels::set_expanded(state, Side::Left, value),
+        Command::EditingLeft { value } => panels::set_editing(state, Side::Left, value),
         Command::ExpandRight { value } => panels::set_expanded(state, Side::Right, value),
         Command::OpenDownloadsFolder => {
             let dir = state.borrow().settings.downloads_dir();
@@ -192,16 +239,15 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
             }
         }
         Command::DownloadControl { id, action } => downloads::control(state, id, &action),
-        Command::ClearHistory => {
-            {
-                let mut st = state.borrow_mut();
-                st.history.clear();
-                st.save_history();
-            }
-            suggest::forget_favicons(state);
-            sync::push_history(state);
-            sync::push_own_pages(state);
+        Command::ClearHistory => library::clear_history(state),
+        Command::HistorySearch { q } => library::search_history(state, &q),
+        Command::RemoveHistory { url } => library::remove_history(state, &url),
+        Command::UpdateBookmark { url, title, new_url, folder } => {
+            library::update_bookmark(state, &url, &title, &new_url, &folder)
         }
+        Command::AddFolder { name } => library::add_folder(state, &name),
+        Command::RenameFolder { from, to } => library::rename_folder(state, &from, &to),
+        Command::RemoveFolder { name } => library::remove_folder(state, &name),
         Command::ToggleBookmark => actions::toggle_bookmark(state),
         Command::RemoveBookmark { url } => {
             {
@@ -241,6 +287,7 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
             sync::push_history(state);
             sync::push_bookmarks(state);
             sync::push_maximized(state);
+            crate::update::push(state);
             // Antes que el fondo: asi se crea ya como imagen fija, no como video.
             sync::push_perf(state);
             sync::push_wallpaper(state);
@@ -306,9 +353,11 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
                     permissions::push_site_permissions(state);
                 }
                 "/insecure" => sync::push_insecure(state, tab_id),
+                "/crashed" => sync::push_crashed(state, tab_id),
                 _ => {}
             }
         }
+        ("/crashed", Command::CrashedReload) => crate::recovery::reload_crashed(state, tab_id),
         ("/", cmd @ (Command::SetTheme { .. } | Command::Search { .. })) => handle_page_command(state, cmd),
         ("/settings", Command::NewIncognitoTab) => state.borrow_mut().request_tab_in(HOME_URL, true),
         (
@@ -327,7 +376,10 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
             | Command::SetPermissionDefault { .. }
             | Command::ResetSitePermission { .. }
             | Command::ImportScan
-            | Command::ImportRun { .. }),
+            | Command::ImportRun { .. }
+            | Command::ClearSiteZoom
+            | Command::UpdateCheck
+            | Command::UpdateInstall),
         ) => handle_page_command(state, cmd),
         ("/insecure", Command::InsecureProceed) => security::proceed_insecure(state, tab_id),
         ("/insecure", Command::InsecureBack) => {
@@ -357,6 +409,7 @@ fn handle_page_command(state: &Shared, cmd: Command) {
             }
             security::apply_smartscreen(state);
             security::apply_tracking_prevention(state);
+            security::apply_autofill(state);
             perf::on_mode_changed(state);
             sync::push_own_pages(state);
             sync::push_wallpaper(state);
@@ -390,27 +443,19 @@ fn handle_page_command(state: &Shared, cmd: Command) {
                 }
             });
         }
-        Command::ClearData { history, cookies, cache, downloads } => {
-            {
-                let mut st = state.borrow_mut();
-                if history {
-                    st.history.clear();
-                    st.closed_tabs.clear();
-                    st.save_history();
-                }
-                if downloads {
-                    st.downloads.retain(|d| d.status == "downloading" || d.status == "paused");
-                }
-            }
+        Command::ClearData { history, cookies, cache, downloads, passwords, autofill } => {
             if history {
-                suggest::forget_favicons(state);
+                library::clear_history(state);
+            }
+            if downloads {
+                state.borrow_mut().downloads.retain(|d| d.status == "downloading" || d.status == "paused");
             }
             sync::push_history(state);
             sync::push_downloads(state);
             let s = state.clone();
             let st = state.borrow();
             if let Some(tb) = &st.topbar {
-                native::clear_browsing_data(tb, ClearKinds { cookies, cache }, move |ok| {
+                native::clear_browsing_data(tb, ClearKinds { cookies, cache, passwords, autofill }, move |ok| {
                     sync::push_own_pages(&s);
                     sync::push_toast(&s, if ok { "Datos borrados" } else { "No se pudieron borrar algunos datos" });
                 });
@@ -438,6 +483,13 @@ fn handle_page_command(state: &Shared, cmd: Command) {
         Command::ImportRun { key, bookmarks, history, cookies, tabs } => {
             import::run(state, key, import::Wants { bookmarks, history, cookies, tabs });
         }
+        Command::ClearSiteZoom => {
+            crate::zoom::forget_all(state);
+            sync::push_own_pages(state);
+            sync::push_toast(state, "Se olvidó el zoom de los sitios");
+        }
+        Command::UpdateCheck => crate::update::start_check(state, true),
+        Command::UpdateInstall => crate::update::install(state),
         _ => {}
     }
 }
@@ -468,6 +520,9 @@ fn set_setting(state: &Shared, key: &str, value: Value) {
             ("clearOnExit", Value::Bool(v)) => s.clear_on_exit = *v,
             ("searchSuggestions", Value::Bool(v)) => s.search_suggestions = *v,
             ("allowAssistant", Value::Bool(v)) => s.allow_assistant = *v,
+            ("savePasswords", Value::Bool(v)) => s.save_passwords = *v,
+            ("autofill", Value::Bool(v)) => s.autofill = *v,
+            ("checkUpdates", Value::Bool(v)) => s.check_updates = *v,
             ("performance", Value::String(v)) if perf::IDS.contains(&v.as_str()) => s.performance = v.clone(),
             ("downloadsDir", Value::Null) => s.downloads_dir = None,
             _ => {
@@ -482,6 +537,7 @@ fn set_setting(state: &Shared, key: &str, value: Value) {
         "smartscreen" => security::apply_smartscreen(state),
         "trackingPrevention" => security::apply_tracking_prevention(state),
         "performance" => perf::on_mode_changed(state),
+        "savePasswords" | "autofill" => security::apply_autofill(state),
         // Lo que no tiene que quedar en el disco, desde ya.
         "clearOnExit" if value == Value::Bool(true) => storage::remove(storage::SESSION_FILE),
         _ => {}
