@@ -7,7 +7,7 @@
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-2021-CE422B?style=for-the-badge&logo=rust&logoColor=white)
 ![WebView2](https://img.shields.io/badge/Motor-WebView2%20(Chromium)-0A7CFF?style=for-the-badge&logo=microsoftedge&logoColor=white)
-![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.6-ff7a1a?style=for-the-badge)
+![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.7-ff7a1a?style=for-the-badge)
 ![Licencia MIT](https://img.shields.io/badge/licencia-MIT-8b7bff?style=for-the-badge)
 
 ### [Descargar el instalador](https://github.com/kilorito2/michi/releases/latest)
@@ -67,8 +67,17 @@ cambia de tamaño: el panel pasa **por encima**, así nada salta ni se reacomoda
 Cada pestaña muestra el **logo del sitio** (su favicon real, tomado del propio
 motor, sin pedirlo a ningún servicio externo); hasta que carga, un puntito.
 
+- **Arrástralas** para cambiarlas de orden.
+- **Fíjalas** (clic derecho › *Fijar pestaña*): quedan arriba de todo, solo con
+  su logo, no se cierran con *Cerrar las demás* y vuelven fijadas al restaurar
+  la sesión.
+- Las que suenan muestran un **altavoz**; un clic las **silencia** (y otro les
+  devuelve el sonido).
+- **Clic derecho** sobre una pestaña: fijar, silenciar, volver a cargar,
+  duplicar, cerrar las demás y cerrar. **Clic con la rueda**: la cierra.
+
 <p align="center">
-  <img src="docs/img/pestanas.jpg" alt="Una página de Wikipedia con el panel de pestañas abierto a la derecha" width="100%">
+  <img src="docs/img/pestanas-panel.gif" alt="Se abre el panel de pestañas, se arrastra una pestaña hasta arriba, se fija otra con el clic derecho y se ve el altavoz tachado de una pestaña silenciada" width="100%">
 </p>
 
 ### <img src="docs/icons/sugerencias.svg" width="22" height="22" alt=""> Barra de direcciones con sugerencias
@@ -92,15 +101,43 @@ Como en Firefox:
 > sin enviar nada. Los logos guardados de los sitios se borran junto con el
 > historial.
 
+### <img src="docs/icons/ventanas.svg" width="22" height="22" alt=""> Menú del clic derecho
+
+El menú de las páginas es el de Chromium (copiar, pegar, guardar imagen,
+inspeccionar...) con lo que trae cualquier navegador y WebView2 no:
+
+| Sobre | Opciones que agrega Michi |
+| --- | --- |
+| Un enlace | **Abrir enlace en una pestaña nueva** (atrás, junto a la actual, como en Chrome) y **en una pestaña de incógnito** |
+| Una imagen | **Abrir imagen en una pestaña nueva** |
+| Texto seleccionado | **Buscar "…" en Google** (o en el buscador que elijas en Ajustes) |
+
+Las que se abren atrás desde una misma pestaña quedan en orden, una después de
+otra. *Abrir vínculo en una ventana nueva* de WebView2 ya no aparece: en Michi
+no hay ventanas, hay pestañas.
+
 ### <img src="docs/icons/descargas.svg" width="22" height="22" alt=""> Descargas, historial y marcadores
 
 Desde el **borde izquierdo** (o con <kbd>Ctrl</kbd>+<kbd>H</kbd>): las descargas
 con su progreso, pausa, reanudar y cancelar; el historial; y los marcadores. Los
 archivos peligrosos esperan a que decidas **Conservar** o **Descartar**.
 
+- **Historial con buscador**: busca en el título y la dirección, sin importar
+  mayúsculas ni acentos. Se agrupa por día (*Hoy*, *Ayer*, *lunes 12 de
+  octubre*...) con la hora de cada visita, y cada página aparece una sola vez.
+  La ✕ de una fila la saca del historial; *Borrar* pide confirmación.
+- **Marcadores en carpetas**: *Nueva carpeta*, y el lápiz de cada marcador
+  cambia su nombre, su dirección o la carpeta (o crea una en el momento). Las
+  carpetas se abren y cierran con un clic, se renombran, y al quitar una sus
+  marcadores no se borran: quedan sueltos. Los que se importan de otro
+  navegador llegan juntos en una carpeta *De Firefox*, *De Google Chrome*...
+
 <p align="center">
-  <img src="docs/img/descargas-historial.jpg" alt="El panel izquierdo con descargas en curso, el historial y los marcadores" width="100%">
+  <img src="docs/img/biblioteca.gif" alt="Se abre el panel izquierdo, se busca gato en el historial y se mueve un marcador a una carpeta nueva llamada Gatos" width="100%">
 </p>
+
+El panel no se cierra mientras escribes en él (el buscador, un marcador), aunque
+el cursor se aleje: se cierra con un clic fuera.
 
 ### <img src="docs/icons/fondos.svg" width="22" height="22" alt=""> Fondos animados
 
@@ -197,12 +234,47 @@ Las que tienen ventana propia aparecen como un icono en la barra superior; su
 popup se abre flotando debajo, como en Chrome, y actúa sobre la pestaña que
 estás viendo.
 
+### <img src="docs/icons/proceso.svg" width="22" height="22" alt=""> Si algo falla
+
+- **Una página se cae** (un error del sitio, o se quedó sin memoria): en vez de
+  quedar en blanco, la pestaña lo dice y ofrece **Volver a cargar**. La barra
+  sigue mostrando la dirección del sitio, y si se cerró por falta de memoria,
+  lo explica. Las demás pestañas ni se enteran.
+- **Una página deja de responder** (un script que no termina): Michi pregunta
+  si volver a cargarla o seguir esperando, como el *La página no responde* de
+  Chrome.
+- **Se cae el motor entero** (el proceso principal de WebView2): Michi guarda
+  las pestañas y **se vuelve a abrir solo**, con todo como estaba. Si vuelve a
+  pasar enseguida, avisa en vez de entrar en un bucle.
+- **Se cae la barra o un panel**: se vuelve a cargar solo.
+- **Al cerrar**, Michi guarda la sesión, cierra cada pestaña y espera a que
+  WebView2 termine de escribir cookies y caché antes de salir (como mucho 3
+  segundos), en vez de cortar el proceso de golpe.
+
+<p align="center">
+  <img src="docs/img/pagina-caida.gif" alt="Una pestaña de Wikipedia se cae, aparece la página Esta página dejó de funcionar y con Volver a cargar vuelve el sitio" width="100%">
+</p>
+
+### <img src="docs/icons/actualizar.svg" width="22" height="22" alt=""> Actualizaciones
+
+Al iniciar (y como mucho dos veces por día) Michi le pregunta a GitHub cuál es
+la última versión publicada. Si hay una más nueva, aparece **Actualizar** en la
+barra, y en **Ajustes › Acerca de** el botón **Descargar e instalar**: baja el
+instalador por HTTPS desde GitHub, comprueba que su tamaño y su huella SHA-256
+sean los que publica GitHub para ese archivo, lo abre y Michi se cierra para que
+pueda reemplazarlo. Nada se descarga ni se instala sin que lo pidas, y la
+búsqueda automática se apaga en el mismo lugar (*Buscar ahora* sigue andando).
+
+<p align="center">
+  <img src="docs/img/actualizaciones.jpg" alt="Ajustes, Acerca de: Michi 0.1.7, Actualizaciones: Michi está al día, y el interruptor para buscar al iniciar" width="100%">
+</p>
+
 ### <img src="docs/icons/atajos.svg" width="22" height="22" alt=""> Atajos de teclado
 
 | Acción | Atajo |
 | --- | --- |
 | Nueva pestaña | <kbd>Ctrl</kbd> + <kbd>T</kbd> |
-| Cerrar pestaña | <kbd>Ctrl</kbd> + <kbd>W</kbd> |
+| Cerrar pestaña | <kbd>Ctrl</kbd> + <kbd>W</kbd> (o clic con la rueda en el panel) |
 | Reabrir pestaña cerrada | <kbd>Ctrl</kbd> + <kbd>Mayús</kbd> + <kbd>T</kbd> |
 | Pestaña de incógnito | <kbd>Ctrl</kbd> + <kbd>Mayús</kbd> + <kbd>N</kbd> |
 | Ir a la pestaña 1 a 8 / a la última | <kbd>Ctrl</kbd> + <kbd>1</kbd> … <kbd>8</kbd> / <kbd>Ctrl</kbd> + <kbd>9</kbd> |
@@ -214,7 +286,7 @@ estás viendo.
 | Menú | <kbd>Alt</kbd> + <kbd>F</kbd> |
 | Buscar en la página | <kbd>Ctrl</kbd> + <kbd>F</kbd> |
 | Recargar | <kbd>F5</kbd> |
-| Zoom | <kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd> |
+| Zoom (se recuerda para cada sitio) | <kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd>, o <kbd>Ctrl</kbd> + rueda |
 | Imprimir | <kbd>Ctrl</kbd> + <kbd>P</kbd> |
 | Herramientas de desarrollador | <kbd>F12</kbd> |
 
@@ -223,7 +295,8 @@ estás viendo.
 - **Ajustes** (`app://localhost/settings`, desde el menú **⋮**): buscador
   predeterminado (Google, Bing, DuckDuckGo, Brave, Ecosia) y sus sugerencias, al iniciar (pestaña
   nueva o restaurar la sesión), fondo, zoom predeterminado, carpeta de
-  descargas, privacidad y seguridad (con incógnito), rendimiento, extensiones.
+  descargas, privacidad y seguridad (con incógnito, contraseñas y formularios),
+  rendimiento, extensiones y actualizaciones.
 - **Menú ⋮**: nueva pestaña, pestaña de incógnito, reabrir cerrada, zoom, marcador, imprimir,
   herramientas de desarrollador, extensiones, ajustes, acerca de, salir.
 - **Michi predeterminado**: puede abrir los enlaces y archivos `.html` de
@@ -235,6 +308,15 @@ estás viendo.
   abrir, cambiar y cerrar pestañas, leer la página, hacer clic, escribir y
   sacar capturas, con los comandos DevTools de cada pestaña y sin abrir un
   puerto de depuración. Se apaga en Ajustes > Privacidad y seguridad.
+- **Zoom por sitio**: si agrandas un sitio al 125%, todas sus páginas abren al
+  125%, en esa pestaña y en las próximas (como en Chrome). Al volver al
+  predeterminado, el sitio se olvida; en **Ajustes › Apariencia** se olvidan
+  todos, y también al borrar el historial. Lo de incógnito no se recuerda.
+- **Contraseñas y formularios**: Michi ofrece guardar la contraseña al iniciar
+  sesión y la completa sola la próxima vez; también sugiere lo que ya
+  escribiste en formularios (nombre, dirección, teléfono). Lo guarda el perfil
+  de WebView2, cifrado por Windows. Se apagan, o se borra lo guardado, en
+  **Ajustes › Privacidad**.
 - **Sonido con nombre**: en el mezclador de volumen de Windows, el sonido de las
   páginas aparece como **Michi**, con su icono. Lo reproduce un proceso de
   WebView2 (`msedgewebview2.exe`), y Michi le pone su nombre a esa sesión de
@@ -299,7 +381,7 @@ estándar.
 | :-: | --- | --- |
 | <img src="docs/icons/seguridad.svg" width="20" height="20" alt=""> | **SmartScreen** | Filtro de Microsoft contra phishing, malware y descargas peligrosas. La librería base (wry) lo apaga por defecto; Michi lo enciende en todas sus vistas. |
 | <img src="docs/icons/https.svg" width="20" height="20" alt=""> | **HTTPS primero** | Intenta siempre la conexión cifrada (ver arriba). |
-| <img src="docs/icons/ventanas.svg" width="20" height="20" alt=""> | **Bloqueo de ventanas emergentes** | Una pestaña nueva solo si la pide un clic. Nunca hacia archivos locales, `data:`, `javascript:` ni páginas internas, y sin `window.opener`. |
+| <img src="docs/icons/ventanas.svg" width="20" height="20" alt=""> | **Bloqueo de ventanas emergentes** | Una pestaña nueva solo si la pide un clic. Nunca hacia archivos locales, `data:`, `javascript:` ni páginas internas. Las que abre una página con un clic conservan su `window.opener`, así los inicios de sesión en ventana emergente ("Continuar con Google") funcionan. |
 | <img src="docs/icons/apps-externas.svg" width="20" height="20" alt=""> | **Aplicaciones externas** | Siempre se bloquean los esquemas con historial de ataques (`ms-msdt:`, `search-ms:`, `ms-officecmd:`, `ms-appinstaller:`, `hcp:`…) y cualquier otro que una página intente abrir sin un clic. |
 | <img src="docs/icons/permisos.svg" width="20" height="20" alt=""> | **Permisos** | Bloquear cámara, micrófono, ubicación, etc. para todos los sitios; nunca a sitios sin HTTPS; notificaciones solo después de un clic; lista de lo que tiene guardado cada sitio. |
 | <img src="docs/icons/descargas.svg" width="20" height="20" alt=""> | **Descargas peligrosas** | Ejecutables, scripts y accesos directos esperan tu decisión; imágenes, PDF, documentos o `.zip` se descargan sin preguntar. Lo que frena SmartScreen queda "Bloqueado". |
@@ -396,7 +478,7 @@ Michi tiene su propio instalador, hecho con la misma base que el navegador
 y con su misma estética: el **fondo animado detrás del vidrio** (que cambia en
 vivo al elegir otro), el zorro y los colores de su degradado.
 
-**Descarga:** `Michi-Setup-0.1.6.exe` en
+**Descarga:** `Michi-Setup-0.1.7.exe` en
 [Releases](https://github.com/kilorito2/michi/releases/latest). No está firmado
 digitalmente, así que Windows puede mostrar el aviso de SmartScreen la primera
 vez: *Más información › Ejecutar de todas formas*.
@@ -558,7 +640,7 @@ src/
   storage.rs      ajustes/marcadores/historial/sesión en disco + buscadores
   chrome.rs       construye los WebViews de la interfaz
   menu.rs         menú ⋮ (un WebView propio que se muestra/oculta)
-  tabs.rs         crear/cerrar pestañas (WebViews de contenido)
+  tabs.rs         crear/cerrar/mover/fijar/silenciar pestañas (WebViews de contenido)
   layout.rs       posición y tamaño de cada WebView
   panels.rs       apertura/cierre animado de los paneles + vigilante del cursor
   actions.rs      acciones diferidas (atajos, menú) fuera de los callbacks
@@ -570,6 +652,11 @@ src/
   downloads.rs    descargas con progreso / pausa / archivos peligrosos
   import.rs       importar marcadores/historial/cookies/pestañas de otros navegadores
   suggest.rs      sugerencias de la barra: completar en línea, buscador, historial
+  library.rs      panel izquierdo: carpetas de marcadores, buscar en el historial
+  context_menu.rs menú del clic derecho de las páginas
+  zoom.rs         zoom por sitio
+  recovery.rs     página caída, página colgada, reabrir si se cae WebView2
+  update.rs       buscar, descargar y verificar versiones nuevas en GitHub
   audio.rs        nombre e icono de Michi en el mezclador de volumen
   security.rs     medidas de seguridad
   permissions.rs  permisos de los sitios
@@ -589,6 +676,7 @@ ui/
   settings.html       ajustes y extensiones
   newtab.html         pestaña nueva
   insecure.html       aviso "este sitio no admite conexiones seguras"
+  crashed.html        "esta página dejó de funcionar"
   ext_popup.js        se inyecta en el popup de una extensión
   content_init.js     se inyecta en cada pestaña
   wallpaper.js        fondo animado compartido
@@ -702,12 +790,12 @@ respondía a CSS, así que se optó por un color sólido.
 
 ## <img src="docs/icons/limitaciones.svg" width="26" height="26" alt=""> Limitaciones conocidas
 
-- **Cerrar la ventana termina el proceso de inmediato** en vez de un apagado
-  prolijo (salvo con "Borrar datos al cerrar", que espera a que termine). Lo
-  importante ya se guarda en cada cambio.
-- **`window.open()` y `target="_blank"`** abren una pestaña nueva, sin
-  `window.opener`; algunos inicios de sesión por ventana emergente (OAuth)
-  pueden no funcionar.
+- **Las contraseñas guardadas no se pueden ver una por una**: WebView2 no da una
+  forma de listarlas ni editarlas. Se usan solas al iniciar sesión y se borran
+  todas juntas desde Ajustes.
+- **El instalador no está firmado**, así que Windows puede mostrar el aviso de
+  "editor desconocido" la primera vez (las actualizaciones desde Michi lo abren
+  directamente).
 - **Extensiones sin popup** (las que hacen algo directo al tocar su icono) no
   aparecen en la barra: WebView2 no permite disparar ese evento desde afuera.
 - **SmartScreen depende de Windows**: si *SmartScreen para Microsoft Edge* está
@@ -731,13 +819,19 @@ respondía a CSS, así que se optó por un color sólido.
 
 ## <img src="docs/icons/hoja-de-ruta.svg" width="26" height="26" alt=""> Hoja de ruta
 
-- [ ] Carpetas y edición de marcadores; buscar en el historial.
+- [x] Carpetas y edición de marcadores; buscar en el historial.
 - [x] Modo incógnito (pestañas con perfil InPrivate de WebView2).
 - [x] Modos de rendimiento: optimizado y super optimizado.
-- [ ] Reordenar pestañas arrastrándolas en el panel.
+- [x] Reordenar pestañas arrastrándolas en el panel; fijarlas y silenciarlas.
 - [x] Una sola instancia: los enlaces de otras aplicaciones abren una pestaña en la ventana abierta.
 - [x] Sugerencias en la barra de direcciones.
+- [x] Menú del clic derecho con pestaña nueva, incógnito y buscar la selección.
+- [x] Recuperarse solo de una página o un motor caídos; cierre ordenado.
+- [x] Actualizaciones desde GitHub, verificadas con SHA-256.
+- [x] Zoom por sitio; guardar contraseñas y completar formularios.
 - [ ] Firmar el instalador.
+- [ ] Ver y administrar las contraseñas guardadas.
+- [ ] Grupos de pestañas.
 
 <br>
 
