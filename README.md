@@ -7,8 +7,9 @@
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-2021-CE422B?style=for-the-badge&logo=rust&logoColor=white)
 ![WebView2](https://img.shields.io/badge/Motor-WebView2%20(Chromium)-0A7CFF?style=for-the-badge&logo=microsoftedge&logoColor=white)
-![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.7-ff7a1a?style=for-the-badge)
+![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.8-ff7a1a?style=for-the-badge)
 ![Licencia MIT](https://img.shields.io/badge/licencia-MIT-8b7bff?style=for-the-badge)
+[![Compilar y probar](https://img.shields.io/github/actions/workflow/status/kilorito2/michi/compilar.yml?branch=main&style=for-the-badge&label=compila)](https://github.com/kilorito2/michi/actions/workflows/compilar.yml)
 
 ### [Descargar el instalador](https://github.com/kilorito2/michi/releases/latest)
 
@@ -46,6 +47,7 @@ bloqueo de ventanas emergentes, extensiones con firma verificada y mucho más.
 
 - [Funciones](#funciones)
 - [Seguridad](#seguridad)
+- [Privacidad: qué sale de tu PC](#privacidad)
 - [Instalador](#instalador)
 - [Compilar desde el código](#compilar)
 - [Arquitectura](#arquitectura)
@@ -75,9 +77,19 @@ motor, sin pedirlo a ningún servicio externo); hasta que carga, un puntito.
   devuelve el sonido).
 - **Clic derecho** sobre una pestaña: fijar, silenciar, volver a cargar,
   duplicar, cerrar las demás y cerrar. **Clic con la rueda**: la cierra.
+- **Grupos de pestañas**, como en Chrome: clic derecho › *Agregar a un grupo
+  nuevo* (o a uno que ya existe). El grupo tiene nombre y color, se **pliega**
+  con un clic en su encabezado para que ocupe una sola fila, y desde su clic
+  derecho se cambia el nombre o el color, se abre una pestaña nueva adentro, se
+  desagrupa o se cierra entero. Arrastrar una pestaña entre las de un grupo la
+  mete en él. Los grupos vuelven al restaurar la sesión.
 
 <p align="center">
   <img src="docs/img/pestanas-panel.gif" alt="Se abre el panel de pestañas, se arrastra una pestaña hasta arriba, se fija otra con el clic derecho y se ve el altavoz tachado de una pestaña silenciada" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/img/grupos.gif" alt="Con el clic derecho se crea el grupo Programación con dos pestañas, se le cambia el color a verde y se pliega" width="100%">
 </p>
 
 ### <img src="docs/icons/sugerencias.svg" width="22" height="22" alt=""> Barra de direcciones con sugerencias
@@ -234,6 +246,30 @@ Las que tienen ventana propia aparecen como un icono en la barra superior; su
 popup se abre flotando debajo, como en Chrome, y actúa sobre la pestaña que
 estás viendo.
 
+### <img src="docs/icons/usuario.svg" width="22" height="22" alt=""> Contraseñas
+
+Michi tiene su propio gestor de contraseñas (WebView2 sabe guardarlas, pero no
+deja verlas ni administrarlas):
+
+- Al iniciar sesión en un sitio, la barra pregunta **¿Guardar la contraseña?**
+  (o **¿Actualizarla?**, si cambió). *Nunca en este sitio* lo recuerda.
+- Después, la **llave** de la barra de direcciones las rellena: con una sola
+  cuenta, de un clic; con varias, eliges cuál. Nunca se rellenan solas al
+  cargar la página, donde cualquier script del sitio las podría leer antes que
+  tú.
+- En **Ajustes › Contraseñas**: buscar, mostrar, copiar (se borra del
+  portapapeles a los 30 segundos), editar, agregar a mano y borrar. Para ver,
+  copiar o editar una, Windows pide tu PIN, huella o cara (**Windows Hello**),
+  si lo tienes configurado.
+- Se guardan en esta PC, **cifradas por Windows** con tu usuario (DPAPI): otra
+  cuenta de la PC, o el archivo copiado a otra PC, no las puede leer. Solo se
+  ofrece guardar en sitios con conexión segura (HTTPS), y una página solo puede
+  ofrecer contraseñas de su propio sitio.
+
+<p align="center">
+  <img src="docs/img/contrasenas.jpg" alt="Ajustes, Contraseñas: la lista de sitios con su usuario y la contraseña oculta, con botones para mostrar, copiar, editar y borrar" width="100%">
+</p>
+
 ### <img src="docs/icons/proceso.svg" width="22" height="22" alt=""> Si algo falla
 
 - **Una página se cae** (un error del sitio, o se quedó sin memoria): en vez de
@@ -312,11 +348,8 @@ búsqueda automática se apaga en el mismo lugar (*Buscar ahora* sigue andando).
   125%, en esa pestaña y en las próximas (como en Chrome). Al volver al
   predeterminado, el sitio se olvida; en **Ajustes › Apariencia** se olvidan
   todos, y también al borrar el historial. Lo de incógnito no se recuerda.
-- **Contraseñas y formularios**: Michi ofrece guardar la contraseña al iniciar
-  sesión y la completa sola la próxima vez; también sugiere lo que ya
-  escribiste en formularios (nombre, dirección, teléfono). Lo guarda el perfil
-  de WebView2, cifrado por Windows. Se apagan, o se borra lo guardado, en
-  **Ajustes › Privacidad**.
+- **Completar formularios**: sugiere lo que ya escribiste en campos parecidos
+  (nombre, dirección, teléfono). Se apaga en **Ajustes › Privacidad**.
 - **Sonido con nombre**: en el mezclador de volumen de Windows, el sonido de las
   páginas aparece como **Michi**, con su icono. Lo reproduce un proceso de
   WebView2 (`msedgewebview2.exe`), y Michi le pone su nombre a esa sesión de
@@ -470,6 +503,28 @@ estándar.
 
 <br>
 
+<a id="privacidad"></a>
+
+## <img src="docs/icons/usuario.svg" width="26" height="26" alt=""> Privacidad: qué sale de tu PC
+
+Michi no tiene servidores propios ni manda nada a su autor: ni estadísticas, ni
+errores, ni lo que visitas. Tus marcadores, historial, contraseñas y ajustes
+quedan en `%APPDATA%\Michi`. Lo único que sale de la PC, además de las páginas
+que abres:
+
+| Qué | A quién | Para qué | Se apaga en |
+| --- | --- | --- | --- |
+| Lo que escribes en la barra (nunca una dirección) | El buscador que elijas | Sugerencias de búsqueda | Ajustes › General |
+| Las direcciones que visitas y lo que descargas | Microsoft (SmartScreen) | Avisar de phishing y malware | Ajustes › Privacidad |
+| Una consulta a la API de GitHub (sin datos tuyos) | GitHub | Saber si hay una versión nueva | Ajustes › Acerca de |
+| El pedido de la extensión que instalas | Chrome Web Store o Complementos de Edge | Instalarla | (solo cuando instalas una) |
+
+El motor, Microsoft Edge WebView2, es parte de Windows y se actualiza con
+Windows Update; sus datos de diagnóstico siguen lo que elijas en *Configuración
+de Windows › Privacidad y seguridad › Diagnóstico y comentarios*.
+
+<br>
+
 <a id="instalador"></a>
 
 ## <img src="docs/icons/instalador.svg" width="26" height="26" alt=""> Instalador
@@ -478,7 +533,7 @@ Michi tiene su propio instalador, hecho con la misma base que el navegador
 y con su misma estética: el **fondo animado detrás del vidrio** (que cambia en
 vivo al elegir otro), el zorro y los colores de su degradado.
 
-**Descarga:** `Michi-Setup-0.1.7.exe` en
+**Descarga:** `Michi-Setup-0.1.8.exe` en
 [Releases](https://github.com/kilorito2/michi/releases/latest). No está firmado
 digitalmente, así que Windows puede mostrar el aviso de SmartScreen la primera
 vez: *Más información › Ejecutar de todas formas*.
@@ -555,8 +610,10 @@ final del instalador el `.exe` y los fondos, con el SHA-256 de cada uno.
 ```
 
 > [!NOTE]
-> El instalador no está firmado digitalmente (hace falta un certificado de firma
-> de código), así que Windows puede advertir de un "editor desconocido".
+> El instalador no está firmado digitalmente, así que Windows puede advertir de
+> un "editor desconocido". La firma gratuita para proyectos de código abierto
+> (SignPath Foundation) no firma paquetes con contenido que no sea de código
+> abierto, y el instalador lleva los fondos animados, que son de terceros.
 
 <br>
 
@@ -641,6 +698,7 @@ src/
   chrome.rs       construye los WebViews de la interfaz
   menu.rs         menú ⋮ (un WebView propio que se muestra/oculta)
   tabs.rs         crear/cerrar/mover/fijar/silenciar pestañas (WebViews de contenido)
+  groups.rs       grupos de pestañas
   layout.rs       posición y tamaño de cada WebView
   panels.rs       apertura/cierre animado de los paneles + vigilante del cursor
   actions.rs      acciones diferidas (atajos, menú) fuera de los callbacks
@@ -656,6 +714,7 @@ src/
   context_menu.rs menú del clic derecho de las páginas
   zoom.rs         zoom por sitio
   recovery.rs     página caída, página colgada, reabrir si se cae WebView2
+  passwords.rs    gestor de contraseñas (DPAPI, Windows Hello, rellenar)
   update.rs       buscar, descargar y verificar versiones nuevas en GitHub
   audio.rs        nombre e icono de Michi en el mezclador de volumen
   security.rs     medidas de seguridad
@@ -686,6 +745,8 @@ installer/            el instalador
   src/payload.rs      los archivos pegados al .exe (y su verificación)
   src/system.rs       registro, accesos directos, procesos
   ui/index.html       la interfaz del instalador
+.github/workflows/
+  compilar.yml        compila y corre las pruebas en GitHub con cada cambio
 tools/
   encode_wallpapers.sh  genera assets/wallpapers/optimized/
   make_icon.ps1         genera michi.ico y michi-256.png
@@ -790,12 +851,12 @@ respondía a CSS, así que se optó por un color sólido.
 
 ## <img src="docs/icons/limitaciones.svg" width="26" height="26" alt=""> Limitaciones conocidas
 
-- **Las contraseñas guardadas no se pueden ver una por una**: WebView2 no da una
-  forma de listarlas ni editarlas. Se usan solas al iniciar sesión y se borran
-  todas juntas desde Ajustes.
+- **Las contraseñas que guardó la versión 0.1.7** (en el gestor de WebView2) no
+  se pueden pasar al gestor nuevo: WebView2 no deja leerlas. Hay que volver a
+  guardarlas (Michi pregunta la próxima vez que inicies sesión).
 - **El instalador no está firmado**, así que Windows puede mostrar el aviso de
   "editor desconocido" la primera vez (las actualizaciones desde Michi lo abren
-  directamente).
+  directamente). Ver la nota de la sección [Instalador](#instalador).
 - **Extensiones sin popup** (las que hacen algo directo al tocar su icono) no
   aparecen en la barra: WebView2 no permite disparar ese evento desde afuera.
 - **SmartScreen depende de Windows**: si *SmartScreen para Microsoft Edge* está
@@ -829,9 +890,11 @@ respondía a CSS, así que se optó por un color sólido.
 - [x] Recuperarse solo de una página o un motor caídos; cierre ordenado.
 - [x] Actualizaciones desde GitHub, verificadas con SHA-256.
 - [x] Zoom por sitio; guardar contraseñas y completar formularios.
-- [ ] Firmar el instalador.
-- [ ] Ver y administrar las contraseñas guardadas.
-- [ ] Grupos de pestañas.
+- [x] Grupos de pestañas.
+- [x] Gestor de contraseñas: ver, buscar, copiar, editar y borrar, con Windows Hello.
+- [x] Compilar y probar en GitHub Actions con cada cambio.
+- [ ] Firmar el instalador (gratis con SignPath Foundation, si el instalador deja
+      de llevar los fondos de terceros).
 
 <br>
 

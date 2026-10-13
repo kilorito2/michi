@@ -1,0 +1,37 @@
+# Compila y prueba Michi en GitHub con cada cambio (gratis en repositorios
+# publicos). El instalador no se arma aca: lleva los fondos animados, que son
+# de terceros y no estan en el repositorio (ver tools/build_installer.ps1).
+name: Compilar y probar
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust estable
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Pruebas
+        run: cargo test --workspace --locked
+
+      - name: Compilar (release)
+        run: cargo build --workspace --release --locked
+
+      - name: Guardar michi.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: michi-${{ github.sha }}
+          path: target/release/michi.exe
+          retention-days: 14

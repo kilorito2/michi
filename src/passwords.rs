@@ -235,11 +235,9 @@ pub fn answer(state: &Shared, choice: &str) {
                 }
                 p.save();
             }
-            "never" => {
-                if !p.store.never.contains(&offer.origin) {
-                    p.store.never.push(offer.origin);
-                    p.save();
-                }
+            "never" if !p.store.never.contains(&offer.origin) => {
+                p.store.never.push(offer.origin);
+                p.save();
             }
             _ => {}
         }
