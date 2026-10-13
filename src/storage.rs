@@ -215,6 +215,18 @@ pub struct Session {
     /// Cuantas de las primeras estan fijadas.
     #[serde(default)]
     pub pinned: usize,
+    /// Grupos de pestanas, y el de cada pestana (indice en `groups`).
+    #[serde(default)]
+    pub groups: Vec<SavedGroup>,
+    #[serde(default)]
+    pub tab_groups: Vec<Option<usize>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SavedGroup {
+    pub name: String,
+    pub color: String,
+    pub collapsed: bool,
 }
 
 /// Ahora, en segundos desde 1970.

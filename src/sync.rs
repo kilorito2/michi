@@ -30,14 +30,23 @@ pub fn push_tabs(state: &Shared) {
                 // Esta sonando (aunque este silenciada: el icono lo dice).
                 "audible": t.playing.audio,
                 "crashed": own_page_path(&t.url) == Some("/crashed"),
+                "group": t.group,
             })
         })
         .collect();
+    let groups: Vec<_> = st
+        .groups
+        .iter()
+        .map(|g| {
+            let hex = crate::groups::COLORS.iter().find(|(c, _)| *c == g.color).map_or("#6c9eff", |c| c.1);
+            json!({ "id": g.id, "name": g.name, "color": g.color, "hex": hex, "collapsed": g.collapsed })
+        })
+        .collect();
+    let colors: Vec<_> = crate::groups::COLORS.iter().map(|(id, hex)| json!({ "id": id, "hex": hex })).collect();
 
     if let Some(rp) = &st.right_panel {
-        if let Ok(payload) = serde_json::to_string(&data) {
-            let _ = rp.evaluate_script(&format!("window.onTabs && window.onTabs({payload})"));
-        }
+        let payload = json!({ "tabs": data, "groups": groups, "colors": colors });
+        let _ = rp.evaluate_script(&format!("window.onTabs && window.onTabs({payload})"));
     }
 }
 

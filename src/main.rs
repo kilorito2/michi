@@ -11,6 +11,7 @@ mod crx;
 mod downloads;
 mod extensions;
 mod fullscreen;
+mod groups;
 mod import;
 mod ipc;
 mod layout;
@@ -266,14 +267,15 @@ fn open_startup_tabs(state: &Shared) {
         tabs::open_tab(state, requested.as_deref().unwrap_or(HOME_URL), false);
         return;
     }
+    let mut ids = Vec::new();
     for (i, url) in session.urls.iter().enumerate() {
         tabs::open_tab(state, url, false);
-        if i < session.pinned {
-            if let Some(tab) = state.borrow_mut().tabs.last_mut() {
-                tab.pinned = true;
-            }
+        if let Some(tab) = state.borrow_mut().tabs.last_mut() {
+            tab.pinned = i < session.pinned;
+            ids.push(tab.id);
         }
     }
+    groups::restore(state, &session, &ids);
     // Lo pedido al abrir (un enlace de otra aplicacion) queda al frente.
     if let Some(url) = requested {
         tabs::open_tab(state, &url, false);

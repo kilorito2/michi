@@ -31,7 +31,13 @@ pub fn open_tab(state: &Shared, url: &str, incognito: bool) {
 /// Una pestana pedida con AppState::request_tab (o atras, con
 /// request_background_tab).
 pub fn open_pending(state: &Shared, p: PendingTab) {
-    let _ = create_tab(state, &p.url, None, p.incognito, p.background);
+    let created = create_tab(state, &p.url, None, p.incognito, p.background);
+    if let (Some(_), Some(group)) = (created, p.group) {
+        let id = state.borrow().tabs.iter().map(|t| t.id).max();
+        if let Some(id) = id {
+            crate::groups::add_to(state, id, group);
+        }
+    }
 }
 
 /// window.open() de una pagina (ver state::PendingWindow): la pestana nace
@@ -225,6 +231,7 @@ fn create_tab(
         crashed: None,
         pinned: false,
         muted: false,
+        group: None,
     };
     {
         let mut st = state.borrow_mut();
@@ -237,11 +244,15 @@ fn create_tab(
                 .filter(|(opener, _)| Some(*opener) == active_id)
                 .and_then(|(_, last)| st.tabs.iter().position(|t| t.id == last));
             let at = after_chain.unwrap_or(st.active).saturating_add(1).max(st.pinned_count()).min(st.tabs.len());
+            // Abierta desde una pestana de un grupo: queda en ese grupo.
+            let mut tab = tab;
+            tab.group = st.active_tab().and_then(|t| t.group);
             st.tabs.insert(at, tab);
             if at <= st.active {
                 st.active += 1;
             }
             st.background_chain = active_id.map(|opener| (opener, id));
+            crate::groups::normalize(&mut st);
         } else {
             st.tabs.push(tab);
             st.active = st.tabs.len() - 1;
@@ -359,6 +370,7 @@ pub fn activated(state: &Shared) {
     // El popup de una extension actua sobre la pestana que estaba al frente.
     crate::popup::close(state);
     crate::fullscreen::on_tab_switch(state);
+    crate::groups::reveal_active(&mut state.borrow_mut());
     layout::relayout(state);
     sync::push_media(state);
     // Como cualquier navegador: la pestana que queda al frente recibe el
@@ -390,6 +402,8 @@ pub fn close_tab(state: &Shared, id: u64) {
             st.closed_tabs.drain(..excess);
         }
         should_reopen = st.tabs.is_empty();
+        // Un grupo que se quedo sin pestanas deja de existir.
+        crate::groups::normalize(&mut st);
         if !should_reopen {
             st.active = if i < was_active { was_active - 1 } else { was_active.min(st.tabs.len() - 1) };
         }
@@ -403,23 +417,32 @@ pub fn close_tab(state: &Shared, id: u64) {
     activated(state);
 }
 
-/// Lleva la pestana `id` a la posicion `to` (lo que se arrastro en el panel).
-/// Las fijadas solo se mueven entre fijadas, y las demas, debajo de ellas.
-pub fn move_tab(state: &Shared, id: u64, to: usize) {
+/// Lleva la pestana `id` justo antes de la pestana `before` (None = al
+/// final): lo que se arrastro en el panel. Por id y no por posicion, porque
+/// el panel no muestra las pestanas de los grupos plegados. Las fijadas solo
+/// se mueven entre fijadas, y las demas, debajo de ellas; y al soltarla entre
+/// dos pestanas de un grupo (o justo debajo de su encabezado, `into_group`),
+/// entra a ese grupo (ver groups::after_move).
+pub fn move_tab(state: &Shared, id: u64, before: Option<u64>, into_group: Option<u64>) {
     {
         let mut st = state.borrow_mut();
         let Some(from) = st.tabs.iter().position(|t| t.id == id) else { return };
-        let pinned = st.pinned_count();
-        let (lo, hi) = if st.tabs[from].pinned { (0, pinned - 1) } else { (pinned, st.tabs.len() - 1) };
-        let to = to.clamp(lo, hi);
-        if to == from {
-            return;
-        }
         let active_id = st.active_tab().map(|t| t.id);
         let tab = st.tabs.remove(from);
-        st.tabs.insert(to, tab);
+        let pinned = st.pinned_count();
+        let at = before.filter(|b| *b != id).and_then(|b| st.tabs.iter().position(|t| t.id == b)).unwrap_or(st.tabs.len());
+        let at = if tab.pinned { at.min(pinned) } else { at.max(pinned) };
+        st.tabs.insert(at, tab);
         if let Some(i) = active_id.and_then(|a| st.tabs.iter().position(|t| t.id == a)) {
             st.active = i;
+        }
+        let joins = into_group.filter(|g| st.groups.iter().any(|x| x.id == *g));
+        match (joins, st.tabs.iter_mut().find(|t| t.id == id && !t.pinned)) {
+            (Some(g), Some(tab)) => {
+                tab.group = Some(g);
+                crate::groups::normalize(&mut st);
+            }
+            _ => crate::groups::after_move(&mut st, id),
         }
         st.save_session();
     }
@@ -438,8 +461,13 @@ pub fn set_pinned(state: &Shared, id: u64, pinned: bool) {
         let active_id = st.active_tab().map(|t| t.id);
         let mut tab = st.tabs.remove(from);
         tab.pinned = pinned;
+        // Una fijada no tiene grupo.
+        if pinned {
+            tab.group = None;
+        }
         let at = st.pinned_count();
         st.tabs.insert(at, tab);
+        crate::groups::normalize(&mut st);
         if let Some(i) = active_id.and_then(|a| st.tabs.iter().position(|t| t.id == a)) {
             st.active = i;
         }
@@ -464,12 +492,15 @@ pub fn set_muted(state: &Shared, id: u64, muted: bool) {
     sync::push_tabs(state);
 }
 
-/// Otra pestana con la misma pagina, justo al lado.
+/// Otra pestana con la misma pagina (en el mismo grupo, si tiene).
 pub fn duplicate(state: &Shared, id: u64) {
     let mut st = state.borrow_mut();
     let Some(tab) = st.tabs.iter().find(|t| t.id == id) else { return };
-    let (url, incognito) = (tab.real_url().to_string(), tab.incognito);
+    let (url, incognito, group) = (tab.real_url().to_string(), tab.incognito, tab.group);
     st.request_tab_in(&url, incognito);
+    if let Some(p) = st.pending_tabs.last_mut() {
+        p.group = group;
+    }
 }
 
 /// Cierra todas menos `id` y las fijadas.

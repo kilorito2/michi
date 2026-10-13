@@ -107,6 +107,20 @@ pub struct Tab {
     pub pinned: bool,
     /// Silenciada desde el panel (ICoreWebView2_8::SetIsMuted).
     pub muted: bool,
+    /// Grupo al que pertenece (ver groups.rs). Las de un mismo grupo van
+    /// siempre juntas en `tabs`, y una fijada nunca tiene grupo.
+    pub group: Option<u64>,
+}
+
+/// Un grupo de pestanas: un nombre y un color en el panel, que se puede
+/// plegar (ver groups.rs).
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct TabGroup {
+    pub id: u64,
+    pub name: String,
+    /// Id de groups::COLORS.
+    pub color: String,
+    pub collapsed: bool,
 }
 
 impl Tab {
@@ -225,6 +239,8 @@ pub struct PendingTab {
     /// Se abre atras, junto a la activa, sin pasar al frente (como "Abrir
     /// enlace en una pestana nueva" en Chrome; ver context_menu.rs).
     pub background: bool,
+    /// Nace dentro de este grupo ("Nueva pestana en el grupo").
+    pub group: Option<u64>,
 }
 
 /// Una ventana que abrio una pagina con window.open(), esperando su pestana.
@@ -407,6 +423,8 @@ pub struct AppState {
     /// (pestana activa, ultima abierta atras desde ella): la proxima que se
     /// abra atras desde esa misma va despues (ver tabs::create_tab).
     pub background_chain: Option<(u64, u64)>,
+    /// Grupos de pestanas (ver groups.rs).
+    pub groups: Vec<TabGroup>,
 
     next_id: u64,
 }
@@ -457,6 +475,7 @@ impl AppState {
             site_zoom: storage::load(storage::SITE_ZOOM_FILE),
             update: Default::default(),
             background_chain: None,
+            groups: Vec::new(),
 
             next_id: 1,
         }
@@ -503,13 +522,13 @@ impl AppState {
 
     /// Lo mismo, indicando si la pestana es de incognito.
     pub fn request_tab_in(&mut self, url: &str, incognito: bool) {
-        self.pending_tabs.push(PendingTab { url: url.to_string(), incognito, background: false });
+        self.pending_tabs.push(PendingTab { url: url.to_string(), incognito, background: false, group: None });
         self.wake();
     }
 
     /// Una pestana que se abre atras, junto a la activa (sin pasar al frente).
     pub fn request_background_tab(&mut self, url: &str, incognito: bool) {
-        self.pending_tabs.push(PendingTab { url: url.to_string(), incognito, background: true });
+        self.pending_tabs.push(PendingTab { url: url.to_string(), incognito, background: true, group: None });
         self.wake();
     }
 
@@ -565,7 +584,27 @@ impl AppState {
         let before = self.tabs.iter().take(self.active).filter(|t| !t.incognito).count();
         // Las fijadas van primero: alcanza con cuantas son.
         let pinned = normal().filter(|t| t.pinned).count();
-        let session = storage::Session { active: before.min(urls.len().saturating_sub(1)), urls, pinned };
+        // Los grupos que tienen alguna pestana normal, y a cual va cada una.
+        let mut groups: Vec<storage::SavedGroup> = Vec::new();
+        let mut index_of: Vec<u64> = Vec::new();
+        let tab_groups = normal()
+            .map(|t| {
+                let g = self.groups.iter().find(|g| Some(g.id) == t.group)?;
+                let i = index_of.iter().position(|id| *id == g.id).unwrap_or_else(|| {
+                    index_of.push(g.id);
+                    groups.push(storage::SavedGroup { name: g.name.clone(), color: g.color.clone(), collapsed: g.collapsed });
+                    index_of.len() - 1
+                });
+                Some(i)
+            })
+            .collect();
+        let session = storage::Session {
+            active: before.min(urls.len().saturating_sub(1)),
+            urls,
+            pinned,
+            groups,
+            tab_groups,
+        };
         storage::save(storage::SESSION_FILE, &session);
     }
 

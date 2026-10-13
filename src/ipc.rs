@@ -46,12 +46,29 @@ pub enum Command {
     CloseTab { id: u64 },
     SwitchTab { id: u64 },
     /// Panel de pestanas: arrastrar, el menu del clic derecho y el altavoz.
-    MoveTab { id: u64, to: usize },
+    /// Llevar la pestana `id` antes de `before` (None = al final); con
+    /// `group`, se solto justo debajo del encabezado de ese grupo.
+    MoveTab {
+        id: u64,
+        before: Option<u64>,
+        #[serde(default)]
+        group: Option<u64>,
+    },
     PinTab { id: u64, pinned: bool },
     MuteTab { id: u64, muted: bool },
     DuplicateTab { id: u64 },
     CloseOtherTabs { id: u64 },
     ReloadTab { id: u64 },
+    /// Grupos de pestanas (ver groups.rs).
+    NewGroup { id: u64 },
+    AddToGroup { id: u64, group: u64 },
+    RemoveFromGroup { id: u64 },
+    UpdateGroup { group: u64, name: Option<String>, color: Option<String>, collapsed: Option<bool> },
+    Ungroup { group: u64 },
+    CloseGroup { group: u64 },
+    NewTabInGroup { group: u64 },
+    /// Se esta escribiendo en el panel de pestanas (el nombre de un grupo).
+    EditingRight { value: bool },
     DragWindow,
     Minimize,
     ToggleMaximize,
@@ -194,7 +211,29 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
             }
             tabs::activated(state);
         }
-        Command::MoveTab { id, to } => tabs::move_tab(state, id, to),
+        Command::MoveTab { id, before, group } => tabs::move_tab(state, id, before, group),
+        Command::NewGroup { id } => {
+            if let Some(group) = crate::groups::create(state, id) {
+                // El panel pide el nombre en el momento.
+                let st = state.borrow();
+                if let Some(rp) = &st.right_panel {
+                    let _ = rp.evaluate_script(&format!("window.onGroupCreated && window.onGroupCreated({group})"));
+                }
+            }
+        }
+        Command::AddToGroup { id, group } => crate::groups::add_to(state, id, group),
+        Command::RemoveFromGroup { id } => crate::groups::remove_from(state, id),
+        Command::UpdateGroup { group, name, color, collapsed } => crate::groups::update(state, group, name, color, collapsed),
+        Command::Ungroup { group } => crate::groups::ungroup(state, group),
+        Command::CloseGroup { group } => crate::groups::close(state, group),
+        Command::NewTabInGroup { group } => {
+            let mut st = state.borrow_mut();
+            st.request_tab(HOME_URL);
+            if let Some(p) = st.pending_tabs.last_mut() {
+                p.group = Some(group);
+            }
+        }
+        Command::EditingRight { value } => panels::set_editing(state, Side::Right, value),
         Command::PinTab { id, pinned } => tabs::set_pinned(state, id, pinned),
         Command::MuteTab { id, muted } => tabs::set_muted(state, id, muted),
         Command::DuplicateTab { id } => tabs::duplicate(state, id),

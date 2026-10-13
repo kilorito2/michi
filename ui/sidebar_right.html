@@ -151,6 +151,34 @@
   .ctx-item:hover { background: var(--glass-bg-strong); }
   .ctx-item.danger:hover { background: rgba(255,107,107,0.25); }
   .ctx-sep { height: 1px; margin: 4px 6px; background: var(--glass-border); }
+
+  /* Grupos: un encabezado con su color y las pestanas con una franja al costado. */
+  .group-head {
+    display: flex; align-items: center; gap: 7px; padding: 6px 8px; margin-top: 4px;
+    border-radius: 10px; cursor: pointer; color: var(--text);
+  }
+  .group-head:hover { background: var(--glass-bg); }
+  .g-chev { flex: none; width: 12px; height: 12px; fill: none; stroke: var(--text-dim); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; transform: rotate(90deg); transition: transform .15s ease; }
+  .group-head.collapsed .g-chev { transform: none; }
+  .g-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--g); }
+  .g-name { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--g); }
+  .g-name.unnamed { color: var(--text-dim); font-weight: 500; }
+  .g-count { flex: none; font-size: 10.5px; color: var(--text-dim); padding: 1px 7px; border-radius: 9px; background: var(--glass-bg); }
+  .group-head.collapsed { background: color-mix(in srgb, var(--g) 14%, transparent); }
+  .g-input {
+    flex: 1; min-width: 0; height: 24px; padding: 0 8px; border-radius: 7px; outline: none;
+    font: inherit; font-size: 12px; color: var(--text); background: rgba(255,255,255,0.1); border: 1px solid var(--g);
+    user-select: text;
+  }
+  .tab-row.in-group { margin-left: 8px; }
+  .tab-row.in-group::before {
+    content: ""; position: absolute; left: -6px; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--g);
+  }
+  .ctx-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: 0; }
+  .ctx-swatches { display: flex; flex-wrap: wrap; gap: 7px; padding: 6px 10px 8px; }
+  .swatch { width: 16px; height: 16px; border-radius: 50%; cursor: pointer; box-shadow: 0 0 0 2px transparent; transition: transform .1s ease; }
+  .swatch:hover { transform: scale(1.15); }
+  .swatch.on { box-shadow: 0 0 0 2px rgba(24,22,38,0.97), 0 0 0 4px #fff; }
 </style>
 </head>
 <body>
@@ -210,16 +238,23 @@
   const list = document.getElementById('list');
   const pinnedEl = document.getElementById('pinned');
   const ctx = document.getElementById('ctx');
+  const CHEV = '<svg class="g-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>';
 
-  // Lo ultimo que mando Rust. Con el boton apretado sobre una pestana no se
-  // redibuja (se perderia el arrastre): se guarda y se pinta al soltar.
+  // Lo ultimo que mando Rust. Con el boton apretado sobre una pestana (o
+  // escribiendo el nombre de un grupo) no se redibuja: se guarda y se pinta
+  // despues.
   let tabs = [];
+  let groups = [];
+  let colors = [];
   let pendingTabs = null;
   let drag = null;
+  let renaming = null;
 
   function titleOf(t) {
     return t.title && t.title.length ? t.title : (t.incognito ? 'Nueva pestaña de incógnito' : 'Nueva pestaña');
   }
+  function groupOf(id) { return groups.find((g) => g.id === id); }
+  function groupLabel(g) { return g.name || 'Grupo sin nombre'; }
 
   function icon(t) {
     const ico = document.createElement('div');
@@ -253,21 +288,62 @@
     return b;
   }
 
-  function render(all) {
-    tabs = all;
+  function render(data) {
+    tabs = data.tabs;
+    groups = data.groups || [];
+    colors = data.colors || colors;
     list.innerHTML = '';
     pinnedEl.innerHTML = '';
-    all.forEach((t) => {
-      const el = t.pinned ? tile(t) : row(t);
+    let current = null;
+    tabs.forEach((t) => {
+      if (t.pinned) {
+        const el = tile(t);
+        el.dataset.id = t.id;
+        wire(el, t);
+        pinnedEl.appendChild(el);
+        return;
+      }
+      const g = t.group != null ? groupOf(t.group) : null;
+      if (g && current !== g.id) {
+        current = g.id;
+        list.appendChild(groupHead(g, t.id));
+      } else if (!g) {
+        current = null;
+      }
+      if (g && g.collapsed) return;
+      const el = row(t, g);
       el.dataset.id = t.id;
       wire(el, t);
-      (t.pinned ? pinnedEl : list).appendChild(el);
+      list.appendChild(el);
     });
   }
 
-  function row(t) {
+  function groupHead(g, firstId) {
+    const h = document.createElement('div');
+    h.className = 'group-head' + (g.collapsed ? ' collapsed' : '');
+    h.dataset.group = g.id;
+    h.dataset.first = firstId;
+    h.style.setProperty('--g', g.hex);
+    const count = tabs.filter((t) => t.group === g.id).length;
+    h.innerHTML = CHEV + '<span class="g-dot"></span>';
+    const name = document.createElement('span');
+    name.className = 'g-name' + (g.name ? '' : ' unnamed');
+    name.textContent = groupLabel(g);
+    h.appendChild(name);
+    const c = document.createElement('span');
+    c.className = 'g-count';
+    c.textContent = count;
+    h.appendChild(c);
+    h.title = g.collapsed ? 'Desplegar el grupo' : 'Plegar el grupo';
+    h.addEventListener('click', () => { if (!renaming) ipc('update_group', { group: g.id, collapsed: !g.collapsed }); });
+    h.addEventListener('contextmenu', (e) => { e.preventDefault(); openGroupMenu(g, e.clientX, e.clientY); });
+    return h;
+  }
+
+  function row(t, g) {
     const r = document.createElement('div');
-    r.className = 'tab-row' + (t.active ? ' active' : '') + (t.incognito ? ' incognito' : '') + (t.crashed ? ' crashed' : '');
+    r.className = 'tab-row' + (t.active ? ' active' : '') + (t.incognito ? ' incognito' : '') + (t.crashed ? ' crashed' : '') + (g ? ' in-group' : '');
+    if (g) r.style.setProperty('--g', g.hex);
     r.title = t.incognito ? 'Pestaña de incógnito' : '';
     r.appendChild(icon(t));
     const title = document.createElement('div');
@@ -302,7 +378,8 @@
   }
 
   // Clic: ir a la pestana. Clic con la rueda: cerrarla. Arrastrar: moverla
-  // (las fijadas entre fijadas, las demas en la lista).
+  // (las fijadas entre fijadas, las demas en la lista; soltarla entre dos
+  // pestanas de un grupo la mete en el grupo).
   function wire(el, t) {
     el.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || e.target.closest('.tab-close, .tab-audio, .badge')) return;
@@ -358,33 +435,77 @@
     if (!d.moved) {
       if (!cancelled) ipc('switch_tab', { id: d.id });
     } else if (!cancelled) {
-      // Posicion en la lista completa: las fijadas van primero.
-      const index = Array.prototype.indexOf.call(d.box.children, el);
-      const offset = d.box === pinnedEl ? 0 : pinnedEl.children.length;
-      ipc('move_tab', { id: d.id, to: offset + index });
+      // Se le dice a Rust ANTES de que pestana quedo (la de la fila que
+      // sigue, o la primera del grupo si lo que sigue es su encabezado): las
+      // de un grupo plegado no estan en la lista, asi que una posicion no
+      // alcanzaria.
+      const next = el.nextElementSibling;
+      const before = !next ? null : next.dataset.first ? +next.dataset.first : +next.dataset.id;
+      // Justo debajo del encabezado de un grupo abierto: entra a ese grupo.
+      const prev = el.previousElementSibling;
+      const group = prev && prev.dataset.group && !prev.classList.contains('collapsed') ? +prev.dataset.group : null;
+      ipc('move_tab', { id: d.id, before: before, group: group });
     }
-    if (pendingTabs) { const p = pendingTabs; pendingTabs = null; render(p); }
+    flush();
   }
 
-  // --- Menu del clic derecho ---
-  function openMenu(t, x, y) {
-    const others = tabs.some((o) => o.id !== t.id && !o.pinned);
-    const items = [
-      [t.pinned ? 'Desfijar pestaña' : 'Fijar pestaña', () => ipc('pin_tab', { id: t.id, pinned: !t.pinned })],
-      [t.muted ? 'Activar el sonido' : 'Silenciar pestaña', () => ipc('mute_tab', { id: t.id, muted: !t.muted })],
-      ['Volver a cargar', () => ipc('reload_tab', { id: t.id })],
-      ['Duplicar', () => ipc('duplicate_tab', { id: t.id })],
-      null,
-    ];
-    if (others) items.push(['Cerrar las demás', () => ipc('close_other_tabs', { id: t.id })]);
-    items.push(['Cerrar', () => ipc('close_tab', { id: t.id }), 'danger']);
+  function flush() {
+    if (pendingTabs && !drag && !renaming) { const p = pendingTabs; pendingTabs = null; render(p); }
+  }
+
+  // --- Nombre de un grupo, en el lugar ---
+  function startRename(groupId) {
+    const head = list.querySelector('.group-head[data-group="' + groupId + '"]');
+    const g = groupOf(groupId);
+    if (!head || !g) return;
+    renaming = groupId;
+    const name = head.querySelector('.g-name');
+    const input = document.createElement('input');
+    input.className = 'g-input';
+    input.value = g.name;
+    input.placeholder = 'Nombre del grupo';
+    input.maxLength = 40;
+    input.spellcheck = false;
+    name.replaceWith(input);
+    ipc('editing_right', { value: true });
+    let done = false;
+    function finish(save) {
+      if (done) return;
+      done = true;
+      renaming = null;
+      ipc('editing_right', { value: false });
+      if (save) ipc('update_group', { group: groupId, name: input.value });
+      else if (pendingTabs == null) pendingTabs = { tabs, groups, colors };
+      flush();
+    }
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') finish(true);
+      if (e.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('click', (e) => e.stopPropagation());
+    input.focus();
+    input.select();
+  }
+  window.onGroupCreated = function (id) { startRename(id); };
+
+  // --- Menus del clic derecho ---
+  function showMenu(items, x, y) {
     ctx.innerHTML = '';
     items.forEach((item) => {
       if (!item) { const sep = document.createElement('div'); sep.className = 'ctx-sep'; ctx.appendChild(sep); return; }
+      if (item.swatches) { ctx.appendChild(item.swatches); return; }
       const el = document.createElement('div');
       el.className = 'ctx-item' + (item[2] ? ' ' + item[2] : '');
       el.setAttribute('role', 'menuitem');
-      el.textContent = item[0];
+      if (item[3]) {
+        const dot = document.createElement('span');
+        dot.className = 'ctx-dot';
+        dot.style.background = item[3];
+        el.appendChild(dot);
+      }
+      el.appendChild(document.createTextNode(item[0]));
       el.addEventListener('click', () => { closeMenu(); item[1](); });
       ctx.appendChild(el);
     });
@@ -393,6 +514,52 @@
     ctx.style.left = Math.max(6, Math.min(x, window.innerWidth - w - 6)) + 'px';
     ctx.style.top = Math.max(6, Math.min(y, window.innerHeight - h - 6)) + 'px';
   }
+
+  function openMenu(t, x, y) {
+    const others = tabs.some((o) => o.id !== t.id && !o.pinned);
+    const items = [
+      [t.pinned ? 'Desfijar pestaña' : 'Fijar pestaña', () => ipc('pin_tab', { id: t.id, pinned: !t.pinned })],
+      [t.muted ? 'Activar el sonido' : 'Silenciar pestaña', () => ipc('mute_tab', { id: t.id, muted: !t.muted })],
+      ['Volver a cargar', () => ipc('reload_tab', { id: t.id })],
+      ['Duplicar', () => ipc('duplicate_tab', { id: t.id })],
+    ];
+    // Grupos (una fijada no puede estar en uno).
+    if (!t.pinned) {
+      items.push(null);
+      items.push(['Agregar a un grupo nuevo', () => ipc('new_group', { id: t.id })]);
+      groups.filter((g) => g.id !== t.group).forEach((g) => {
+        items.push(['Agregar a «' + groupLabel(g) + '»', () => ipc('add_to_group', { id: t.id, group: g.id }), '', g.hex]);
+      });
+      if (t.group != null) items.push(['Quitar del grupo', () => ipc('remove_from_group', { id: t.id })]);
+    }
+    items.push(null);
+    if (others) items.push(['Cerrar las demás', () => ipc('close_other_tabs', { id: t.id })]);
+    items.push(['Cerrar', () => ipc('close_tab', { id: t.id }), 'danger']);
+    showMenu(items, x, y);
+  }
+
+  function openGroupMenu(g, x, y) {
+    const sw = document.createElement('div');
+    sw.className = 'ctx-swatches';
+    colors.forEach((c) => {
+      const s = document.createElement('span');
+      s.className = 'swatch' + (c.id === g.color ? ' on' : '');
+      s.style.background = c.hex;
+      s.title = c.id.charAt(0).toUpperCase() + c.id.slice(1);
+      s.addEventListener('click', () => { closeMenu(); ipc('update_group', { group: g.id, color: c.id }); });
+      sw.appendChild(s);
+    });
+    showMenu([
+      ['Cambiar el nombre', () => startRename(g.id)],
+      { swatches: sw },
+      ['Nueva pestaña en el grupo', () => ipc('new_tab_in_group', { group: g.id })],
+      [g.collapsed ? 'Desplegar' : 'Plegar', () => ipc('update_group', { group: g.id, collapsed: !g.collapsed })],
+      null,
+      ['Desagrupar', () => ipc('ungroup', { group: g.id })],
+      ['Cerrar el grupo', () => ipc('close_group', { group: g.id }), 'danger'],
+    ], x, y);
+  }
+
   function closeMenu() { ctx.hidden = true; }
   document.addEventListener('pointerdown', (e) => { if (!ctx.hidden && !ctx.contains(e.target)) closeMenu(); }, true);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
@@ -405,9 +572,9 @@
     if (!value) closeMenu();
   };
 
-  window.onTabs = function (all) {
-    if (drag) { pendingTabs = all; return; }
-    render(all);
+  window.onTabs = function (data) {
+    if (drag || renaming) { pendingTabs = data; return; }
+    render(data);
   };
 
   ipc('ready');
