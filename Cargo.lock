@@ -1767,6 +1767,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "michi-firmar"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "ring",
+]
+
+[[package]]
 name = "michi-setup"
 version = "0.1.0"
 dependencies = [

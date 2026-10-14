@@ -273,7 +273,12 @@ pub fn run(state: &Shared, key: String, wants: Wants) {
         (st.proxy.clone(), label)
     };
     let Some(proxy) = proxy else { return };
-    let label = label.unwrap_or_else(|| "otro navegador".to_string());
+    // Solo uno de los perfiles que encontro scan(): la clave lleva la carpeta
+    // a leer, y no se lee cualquier carpeta que llegue por IPC.
+    let Some(label) = label else {
+        eprintln!("[seguridad] importar: perfil desconocido {key}");
+        return;
+    };
 
     std::thread::spawn(move || {
         let data = read(&key, &label, wants);

@@ -288,7 +288,7 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
             // Mostrarlo en su carpeta, no abrirlo: abrir de un clic un .exe
             // recien bajado no es algo que un panel lateral deba hacer.
             if let Some(path) = path.filter(|p| p.exists()) {
-                let _ = std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();
+                crate::win::show_in_folder(&path);
             }
         }
         Command::DownloadControl { id, action } => downloads::control(state, id, &action),
@@ -598,7 +598,10 @@ fn set_setting(state: &Shared, key: &str, value: Value) {
             }
             ("clearOnExit", Value::Bool(v)) => s.clear_on_exit = *v,
             ("searchSuggestions", Value::Bool(v)) => s.search_suggestions = *v,
-            ("allowAssistant", Value::Bool(v)) => s.allow_assistant = *v,
+            ("allowAssistant", Value::Bool(v)) => {
+                s.allow_assistant = *v;
+                s.assistant_asked = true;
+            }
             ("savePasswords", Value::Bool(v)) => s.save_passwords = *v,
             ("autofill", Value::Bool(v)) => s.autofill = *v,
             ("checkUpdates", Value::Bool(v)) => s.check_updates = *v,

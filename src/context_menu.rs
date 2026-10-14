@@ -51,16 +51,24 @@ pub fn attach(state: &Shared, webview: &WebView, id: u64) {
             let mut b = BOOL(0);
             f(&mut b).is_ok() && b.as_bool()
         };
-        let (incognito, engine) = {
+        let (incognito, engine, page) = {
             let st = s.borrow();
-            let incognito = st.tabs.iter().find(|t| t.id == id).is_some_and(|t| t.incognito);
-            (incognito, storage::engine(&st.settings.search_engine).1)
+            let tab = st.tabs.iter().find(|t| t.id == id);
+            let incognito = tab.is_some_and(|t| t.incognito);
+            let page = tab.map(|t| t.url.clone()).unwrap_or_default();
+            (incognito, storage::engine(&st.settings.search_engine).1, page)
         };
 
         let mut extra: Vec<(String, Choice)> = Vec::new();
         if flag(&|p| unsafe { target.HasLinkUri(p) }) {
             let link = unsafe { read_pwstr(|p| target.LinkUri(p)) };
-            if security::is_safe_to_open(&link) {
+            // El mismo filtro que window.open (ver security::popup_target_allowed):
+            // la pestana la abrimos nosotros, y para el motor eso es como si la
+            // hubiera escrito el usuario. Sin el, un sitio podia hacer abrir
+            // archivos locales o de una carpeta de red (file://servidor/...,
+            // que le manda a ese servidor la credencial de Windows), nuestras
+            // paginas internas o las de cualquier extension.
+            if security::popup_target_allowed(&link, &page) {
                 remove_named(&items, "openLinkInNewWindow");
                 extra.push(("Abrir enlace en una pestaña nueva".into(), Choice::Background(link.clone())));
                 if !incognito {
@@ -74,7 +82,7 @@ pub fn attach(state: &Shared, webview: &WebView, id: u64) {
         // se lee igual.
         if kind == COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_IMAGE {
             let src = unsafe { read_pwstr(|p| target.SourceUri(p)) };
-            if !src.is_empty() && security::is_safe_to_open(&src) {
+            if !src.is_empty() && security::popup_target_allowed(&src, &page) {
                 extra.push(("Abrir imagen en una pestaña nueva".into(), Choice::Background(src)));
             }
         }

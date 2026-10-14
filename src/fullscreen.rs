@@ -130,4 +130,15 @@ fn apply(state: &Shared) {
     if window.fullscreen().is_some() != on {
         window.set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
     }
+    // Que sitio tapa la pantalla, y como salir (ver notice.rs). Cada vez que
+    // entra: si no, un sitio que sale y vuelve a entrar lo esquivaria.
+    if on {
+        let host = {
+            let st = state.borrow();
+            st.active_tab().and_then(|t| crate::security::host_of(t.real_url())).unwrap_or_default()
+        };
+        crate::notice::show(state, &host);
+    } else {
+        crate::notice::hide(state);
+    }
 }

@@ -603,7 +603,12 @@
   }
   function set(key, value) { ipc('set_setting', { key: key, value: value }); }
   function $(id) { return document.getElementById(id); }
-  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+  // Tambien las comillas: algunos valores van dentro de un atributo (aria-label="...").
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
 
   // --- Secciones (por #hash, asi el menu puede abrir directo en una) ---
   var SECTIONS = ['general', 'appearance', 'privacy', 'passwords', 'performance', 'downloads', 'import', 'extensions', 'about'];

@@ -686,6 +686,25 @@ fn on_new_window(state: &Shared, core: &ICoreWebView2, id: u64) {
 /// WebView2 ya pregunta antes de abrir una; ademas, se bloquean siempre los
 /// esquemas peligrosos (BLOCKED_SCHEMES) y los que una pagina intenta abrir
 /// sin un clic del usuario.
+/// Lo mismo para un WebView que no es una pestana (el popup de una
+/// extension, ver popup.rs): sin registro para el escudo de la barra.
+pub fn guard_external_schemes(core: &ICoreWebView2) {
+    let Ok(core18) = core.cast::<ICoreWebView2_18>() else { return };
+    let handler = LaunchingExternalUriSchemeEventHandler::create(Box::new(move |_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let uri = unsafe { read_pwstr(|p| args.Uri(p)) };
+        let mut user = BOOL(0);
+        unsafe { args.IsUserInitiated(&mut user)? };
+        if is_blocked_scheme(&uri) || !user.as_bool() {
+            unsafe { args.SetCancel(true)? };
+            eprintln!("[seguridad] bloqueado: un popup de extension intento abrir {}:", uri.split(':').next().unwrap_or_default());
+        }
+        Ok(())
+    }));
+    let mut token = 0i64;
+    let _ = unsafe { core18.add_LaunchingExternalUriScheme(&handler, &mut token) };
+}
+
 fn on_external_scheme(state: &Shared, core: &ICoreWebView2, id: u64) {
     let Ok(core18) = core.cast::<ICoreWebView2_18>() else { return };
     let s = state.clone();
@@ -817,7 +836,7 @@ pub fn shutdown(state: &Shared) {
         let mut views: Vec<WebView> = std::mem::take(&mut st.tabs).into_iter().map(|t| t.webview).collect();
         views.extend(st.ext_popup.take().map(|p| p.webview));
         views.extend(
-            [st.topbar.take(), st.left_panel.take(), st.right_panel.take(), st.menu.take(), st.suggest.view.take()]
+            [st.topbar.take(), st.left_panel.take(), st.right_panel.take(), st.menu.take(), st.suggest.view.take(), st.notice.take()]
                 .into_iter()
                 .flatten(),
         );
@@ -937,12 +956,24 @@ pub fn popup_target_allowed(target: &str, opener: &str) -> bool {
     lower.starts_with("chrome-extension://") && origin_of(target).is_some() && origin_of(target) == origin_of(opener)
 }
 
+/// Esquemas que se pueden abrir desde un marcador, el historial o las
+/// sugerencias (ver is_safe_to_open).
+const SAFE_SCHEMES: &[&str] = &["http", "https", "file", "about", "chrome-extension", "app", "mailto"];
+
 /// Una URL que se puede abrir desde un marcador o el historial: nunca
 /// codigo (javascript:, vbscript:) ni una pagina armada dentro de la propia
-/// URL (data:, la forma clasica de disfrazar una pagina de phishing).
+/// URL (data:, la forma clasica de disfrazar una pagina de phishing). Lista
+/// de los permitidos, no de los prohibidos, y el esquema leido como lo lee el
+/// motor: Chromium borra los tabuladores y saltos de linea de cualquier
+/// parte de la URL, y los espacios y caracteres de control del principio, asi
+/// que "java\tscript:" para el es "javascript:".
 pub fn is_safe_to_open(url: &str) -> bool {
-    let scheme = url.trim_start().split(':').next().unwrap_or_default().to_ascii_lowercase();
-    !matches!(scheme.as_str(), "javascript" | "vbscript" | "data")
+    let clean: String = url.chars().filter(|c| !matches!(c, '\t' | '\n' | '\r')).collect();
+    let clean = clean.trim_start_matches(|c: char| c <= ' ');
+    match clean.split_once(':') {
+        Some((scheme, _)) => SAFE_SCHEMES.contains(&scheme.to_ascii_lowercase().as_str()),
+        None => false,
+    }
 }
 
 pub fn is_blocked_scheme(uri: &str) -> bool {
@@ -1065,6 +1096,15 @@ mod tests {
         assert!(!is_safe_to_open("javascript:alert(1)"));
         assert!(!is_safe_to_open(" JavaScript:alert(1)"));
         assert!(!is_safe_to_open("data:text/html,<h1>banco</h1>"));
+        // Como lo lee Chromium: sin tabs ni saltos de linea, sin control al inicio.
+        assert!(!is_safe_to_open("java\tscript:alert(1)"));
+        assert!(!is_safe_to_open("java\nscript:alert(1)"));
+        assert!(!is_safe_to_open("\u{1}javascript:alert(1)"));
+        assert!(!is_safe_to_open("vbscript:msgbox(1)"));
+        assert!(!is_safe_to_open("ms-msdt:/id x"));
+        assert!(!is_safe_to_open("sin esquema"));
+        assert!(is_safe_to_open("about:blank"));
+        assert!(is_safe_to_open("http://app.localhost/settings"));
     }
 
     #[test]

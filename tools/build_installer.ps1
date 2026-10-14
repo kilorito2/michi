@@ -48,3 +48,15 @@ try {
     $dest.Close()
 }
 "== Listo: $out ({0:N1} MB)" -f ((Get-Item $out).Length / 1MB)
+
+# La firma para las actualizaciones (ver src/update.rs y tools/firmar): Michi
+# no abre un instalador descargado sin su .sig. La clave privada vive fuera del
+# proyecto (y fuera de GitHub); MICHI_CLAVE_FIRMA puede apuntar a otra.
+$key = if ($env:MICHI_CLAVE_FIRMA) { $env:MICHI_CLAVE_FIRMA } else { Join-Path $env:USERPROFILE '.michi\clave-actualizaciones.pk8' }
+if (-not (Test-Path $key)) {
+    throw "No esta la clave para firmar ($key). Sin el .sig, Michi no instala esta version desde Actualizar."
+}
+"== Firmando para las actualizaciones"
+cargo run --release -q -p michi-firmar -- firmar $out $key
+if ($LASTEXITCODE -ne 0) { throw "fallo la firma" }
+"== Publicar en la version de GitHub los DOS archivos: $(Split-Path $out -Leaf) y $(Split-Path $out -Leaf).sig"

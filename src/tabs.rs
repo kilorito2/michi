@@ -233,6 +233,7 @@ fn create_tab(
         muted: false,
         group: None,
         password_offer: None,
+        assistant: false,
     };
     {
         let mut st = state.borrow_mut();

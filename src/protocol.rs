@@ -115,6 +115,7 @@ pub fn handle(request: Request<Vec<u8>>, responder: RequestAsyncResponder) {
         "/settings" => Some(include_bytes!("../ui/settings.html")),
         "/insecure" => Some(include_bytes!("../ui/insecure.html")),
         "/crashed" => Some(include_bytes!("../ui/crashed.html")),
+        "/notice" => Some(include_bytes!("../ui/notice.html")),
         _ => None,
     };
     if let Some(body) = page {
@@ -334,7 +335,7 @@ mod tests {
 
     #[test]
     fn every_page_script_gets_this_responses_nonce() {
-        let pages: [&'static [u8]; 9] = [
+        let pages: [&'static [u8]; 10] = [
             include_bytes!("../ui/newtab.html"),
             include_bytes!("../ui/topbar.html"),
             include_bytes!("../ui/sidebar_left.html"),
@@ -344,6 +345,7 @@ mod tests {
             include_bytes!("../ui/settings.html"),
             include_bytes!("../ui/insecure.html"),
             include_bytes!("../ui/crashed.html"),
+            include_bytes!("../ui/notice.html"),
         ];
 
         for page in pages {

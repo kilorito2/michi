@@ -174,11 +174,33 @@ pub fn install_from_store(state: &Shared, store: Store, id: String) {
                 return Err("La tienda entregó una extensión distinta de la pedida: no se instaló.".into());
             }
             let staged = Staged::unpack(package.archive)?;
+            not_older(&id, &staged.root)?;
             staged.confirm(origin)?;
             staged.commit(&extensions_dir().join(&id))
         });
         send_result(proxy, result);
     });
+}
+
+/// Una version de la tienda mas vieja que la instalada no se instala. La
+/// firma garantiza que el paquete es del desarrollador, pero no que sea el
+/// ultimo: Complementos de Edge lo entrega por HTTP (ver download), y alguien
+/// en la red podia servir una version anterior, autentica, con fallas ya
+/// arregladas.
+fn not_older(id: &str, staged_root: &Path) -> Result<(), String> {
+    let version_of = |dir: &Path| read_manifest(dir)?.get("version")?.as_str().map(str::to_string);
+    let installed = registry().lock().unwrap().get(id).cloned().and_then(|dir| version_of(&dir));
+    match (installed, version_of(staged_root)) {
+        (Some(old), Some(new)) if version_parts(&new) < version_parts(&old) => Err(format!(
+            "La tienda entregó una versión más vieja ({new}) que la instalada ({old}): no se instaló."
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// "1.10.2" -> [1, 10, 2], para comparar numero por numero.
+fn version_parts(v: &str) -> Vec<u64> {
+    v.split('.').map(|p| p.trim().parse().unwrap_or(0)).collect()
 }
 
 /// Instalar desde un .crx o .zip del disco (elegido con un dialogo).
@@ -195,7 +217,9 @@ pub fn install_from_file(state: &Shared) {
         };
         let result = std::fs::read(&file).map_err(|e| e.to_string()).and_then(|bytes| {
             let (archive, origin) = if crx::is_crx(&bytes) {
-                (crx::verify(&bytes)?.archive, "archivo .crx, firma verificada")
+                // La firma solo prueba que nadie lo cambio despues de que lo
+                // firmo su autor: cualquiera puede firmar el suyo.
+                (crx::verify(&bytes)?.archive, "archivo .crx firmado por su autor (ninguna tienda lo revisó)")
             } else {
                 (&bytes[..], "archivo .zip SIN FIRMA: no hay forma de saber quien lo hizo ni si fue modificado")
             };
@@ -812,6 +836,14 @@ mod tests {
             permission_warnings(&json!({ "content_scripts": [{ "matches": ["*://*/*"] }] }))[0],
             "Leer y cambiar todos tus datos en todos los sitios web"
         );
+    }
+
+    #[test]
+    fn versions_compare_number_by_number() {
+        assert!(version_parts("1.10.0") > version_parts("1.9.9"));
+        assert!(version_parts("2.0") > version_parts("1.99.99.99"));
+        assert!(version_parts("1.2") < version_parts("1.2.1"));
+        assert_eq!(version_parts("1.2.3"), version_parts("1.2.3"));
     }
 
     #[test]

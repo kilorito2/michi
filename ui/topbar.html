@@ -206,6 +206,14 @@
   .update-btn:active { transform: scale(.96); }
   .update-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
   .update-btn[hidden] { display: none; }
+  /* May esta usando Michi por el pipe de control (ver src/control.rs). */
+  .assistant {
+    flex: none; display: flex; align-items: center; gap: 5px;
+    height: 24px; padding: 0 10px 0 8px; margin-right: 6px; border-radius: 999px;
+    background: rgba(108,158,255,0.2); color: #cfe0ff; font-size: 12px; white-space: nowrap;
+  }
+  .assistant[hidden] { display: none; }
+  .assistant svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 
   /* Iconos de extensiones (ver src/popup.rs). */
   .ext-bar { display: flex; gap: 2px; flex: none; }
@@ -256,6 +264,9 @@
 
     <div class="drag-spacer"></div>
 
+    <div class="assistant" id="assistant" hidden title="May (u otro programa de este equipo) está controlando Michi. Se apaga en Ajustes > Privacidad y seguridad.">
+      <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>May</span>
+    </div>
     <div class="update-btn" id="update" hidden title="Hay una versión nueva de Michi">
       <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg><span>Actualizar</span>
     </div>
@@ -550,6 +561,11 @@
   document.getElementById('pw-dismiss').addEventListener('click', () => ipc('password_answer', { choice: 'dismiss' }));
 
   // Rust -> UI: hay (o no) una version nueva de Michi (ver src/update.rs).
+  // Rust -> UI: May esta (o dejo de estar) usando Michi (ver src/control.rs).
+  window.onAssistant = function (on) {
+    document.getElementById('assistant').hidden = !on;
+  };
+
   const updateBtn = document.getElementById('update');
   updateBtn.addEventListener('click', () => ipc('menu', { action: 'about' }));
   window.onUpdate = function (u) {

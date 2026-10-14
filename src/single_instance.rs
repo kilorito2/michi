@@ -9,17 +9,17 @@
 //!
 //! Los nombres del mutex y del pipe llevan un hash de la ruta del .exe: cada
 //! instalacion (y cada compilacion de prueba) es su propio "un solo Michi".
+//! El pipe es solo de este usuario de Windows (ver pipes.rs).
 
 use std::hash::{Hash, Hasher};
 
 use winit::event_loop::EventLoopProxy;
-use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE,
+use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, ReadFile, WriteFile, OPEN_EXISTING, PIPE_ACCESS_INBOUND, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
 };
-use windows_sys::Win32::Storage::FileSystem::{CreateFileW, ReadFile, WriteFile, OPEN_EXISTING, PIPE_ACCESS_INBOUND};
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, WaitNamedPipeW, PIPE_READMODE_BYTE,
-    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+    DisconnectNamedPipe, WaitNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
@@ -44,8 +44,8 @@ pub fn install_id() -> u64 {
     h.finish()
 }
 
-fn pipe_name() -> Vec<u16> {
-    wide(&format!("\\\\.\\pipe\\Michi-{:016x}", install_id()))
+fn pipe_name() -> String {
+    crate::pipes::name(&format!("Michi-{:016x}", install_id()))
 }
 
 /// Solo lo que un enlace o un archivo puede pedir: web y archivos locales.
@@ -98,12 +98,29 @@ fn forward(url: Option<&str>) -> bool {
     // se lo permite si el proceso que esta en primer plano (este, recien
     // abierto) le cede el permiso.
     unsafe { AllowSetForegroundWindow(ASFW_ANY) };
-    let pipe = pipe_name();
+    let pipe = wide(&pipe_name());
     for _ in 0..3 {
+        // Solo identificacion: el servidor sabe quien se conecta pero no puede
+        // actuar en su nombre (si no fuera el nuestro).
         let handle = unsafe {
-            CreateFileW(pipe.as_ptr(), GENERIC_WRITE, 0, std::ptr::null(), OPEN_EXISTING, 0, std::ptr::null_mut())
+            CreateFileW(
+                pipe.as_ptr(),
+                GENERIC_WRITE,
+                0,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+                std::ptr::null_mut(),
+            )
         };
         if handle != INVALID_HANDLE_VALUE {
+            // Un pipe con este nombre que no es de este usuario: lo creo otra
+            // cuenta de la PC para quedarse con lo que se abre. Nada se le manda.
+            if !crate::pipes::owned_by_me(handle) {
+                eprintln!("[seguridad] el pipe de Michi es de otro usuario: no se usa");
+                unsafe { CloseHandle(handle) };
+                return false;
+            }
             let mut written = 0u32;
             let ok = unsafe {
                 WriteFile(handle, message.as_ptr(), message.len() as u32, &mut written, std::ptr::null_mut())
@@ -125,34 +142,21 @@ fn forward(url: Option<&str>) -> bool {
 /// (ConnectNamedPipe bloquea hasta que llega alguien).
 pub fn listen(proxy: EventLoopProxy<UserEvent>) {
     std::thread::spawn(move || {
-        let name = pipe_name();
+        let mut listener = crate::pipes::Listener::new(
+            &pipe_name(),
+            PIPE_ACCESS_INBOUND,
+            // Nunca desde otra PC de la red.
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            0,
+            MAX_MESSAGE as u32,
+        );
         loop {
-            let pipe = unsafe {
-                CreateNamedPipeW(
-                    name.as_ptr(),
-                    PIPE_ACCESS_INBOUND,
-                    // Nunca desde otra PC de la red.
-                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                    PIPE_UNLIMITED_INSTANCES,
-                    0,
-                    MAX_MESSAGE as u32,
-                    0,
-                    std::ptr::null(),
-                )
-            };
-            if pipe == INVALID_HANDLE_VALUE {
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                continue;
-            }
-            let connected =
-                unsafe { ConnectNamedPipe(pipe, std::ptr::null_mut()) } != 0 || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
-            if connected {
-                if let Some(event) = parse(&read_all(pipe)) {
-                    if proxy.send_event(event).is_err() {
-                        // El bucle de eventos ya termino: el navegador se cierra.
-                        unsafe { CloseHandle(pipe) };
-                        return;
-                    }
+            let pipe = listener.accept();
+            if let Some(event) = parse(&read_all(pipe)) {
+                if proxy.send_event(event).is_err() {
+                    // El bucle de eventos ya termino: el navegador se cierra.
+                    unsafe { CloseHandle(pipe) };
+                    return;
                 }
             }
             unsafe {

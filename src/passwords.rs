@@ -11,12 +11,15 @@
 //!   pone WebView2): una pagina no puede ofrecer contrasenas de otro sitio.
 //! - Disco: passwords.json, con cada contrasena cifrada por Windows (DPAPI,
 //!   atada a tu usuario de Windows). Otro usuario de la PC, o el archivo
-//!   copiado a otra PC, no la puede leer.
+//!   copiado a otra PC, no la puede leer. Un programa que corre con TU
+//!   usuario si (igual que con las de Chrome o Edge): DPAPI protege de otras
+//!   cuentas, no de lo que tu mismo ejecutas.
 //! - Rellenar: solo al tocar la llave de la barra (no sola al cargar la
 //!   pagina, donde cualquier script del sitio la podria leer antes que vos), y
 //!   solo si la pestana sigue en el mismo sitio.
 //! - Ver, copiar o editar una en Ajustes pide Windows Hello (PIN, huella o
-//!   cara) si esta configurado; vale por 2 minutos.
+//!   cara) si esta configurado; vale por 2 minutos. Es contra otra persona
+//!   sentada frente a la PC con tu sesion abierta, no contra programas.
 
 use std::time::{Duration, Instant};
 
@@ -27,7 +30,9 @@ use crate::state::{Shared, UserEvent};
 use crate::{security, storage, sync};
 
 const FILE: &str = "passwords.json";
-/// Entropia extra de DPAPI: otra app del mismo usuario no lo descifra sin ella.
+/// Entropia extra de DPAPI. No es un secreto (esta en el codigo publico): solo
+/// separa estos datos de los de otros programas que usan DPAPI, y no se puede
+/// cambiar sin perder las contrasenas ya guardadas.
 const ENTROPY: &[u8] = b"Michi-contrasenas-v1";
 /// Cuanto dura la verificacion de Windows Hello en Ajustes.
 const VERIFIED_FOR: Duration = Duration::from_secs(120);

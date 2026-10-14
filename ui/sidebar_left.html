@@ -669,10 +669,9 @@
     renderBookmarks();
   };
 
+  // Tambien las comillas, por si un valor termina dentro de un atributo.
   function escapeHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s == null ? '' : s;
-    return d.innerHTML;
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   }
 
   ipc('ready');

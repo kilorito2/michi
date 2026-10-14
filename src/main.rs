@@ -16,10 +16,12 @@ mod import;
 mod ipc;
 mod layout;
 mod menu;
+mod notice;
 mod native;
 mod panels;
 mod passwords;
 mod perf;
+mod pipes;
 mod permissions;
 mod popup;
 mod protocol;
@@ -102,7 +104,8 @@ impl ApplicationHandler<UserEvent> for App {
         let right = chrome::build_right_panel(&self.state);
         let menu = menu::build(&self.state);
         let suggestions = suggest::build(&self.state);
-        for wv in [&topbar, &left, &right, &menu, &suggestions] {
+        let notice = notice::build(&self.state);
+        for wv in [&topbar, &left, &right, &menu, &suggestions, &notice] {
             security::harden(&self.state, wv);
             shortcuts::attach(&self.state, wv, wv_is_chrome(wv, &topbar, &left, &right));
             recovery::attach(&self.state, wv, None);
@@ -114,6 +117,7 @@ impl ApplicationHandler<UserEvent> for App {
             st.right_panel = Some(right);
             st.menu = Some(menu);
             st.suggest.view = Some(suggestions);
+            st.notice = Some(notice);
         }
         // Ajustes del perfil (necesitan algun WebView ya creado).
         security::apply_tracking_prevention(&self.state);
@@ -171,6 +175,7 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::ImportFailed(message) => sync::push_toast(&self.state, &message),
             UserEvent::SearchSuggestions { seq, query, list } => suggest::on_engine(&self.state, seq, query, list),
             UserEvent::Control(request) => control::handle(&self.state, request),
+            UserEvent::AssistantConsent(allowed, request) => control::on_consent(&self.state, allowed, request),
             UserEvent::ReloadHung(id) => recovery::reload_hung(&self.state, id),
             UserEvent::Update(event) => update::on_event(&self.state, event),
             UserEvent::PasswordsVerified(ok) => passwords::on_verified(&self.state, ok),
@@ -225,7 +230,20 @@ impl ApplicationHandler<UserEvent> for App {
         let quit = security::quit_deadline(&self.state);
         let perf = perf::tick(&self.state);
         let update = update::tick(&self.state);
-        match panels.into_iter().chain(menu).chain(popup).chain(https).chain(quit).chain(perf).chain(update).min() {
+        let notice = notice::tick(&self.state);
+        let assistant = control::tick(&self.state);
+        match panels
+            .into_iter()
+            .chain(menu)
+            .chain(popup)
+            .chain(https)
+            .chain(quit)
+            .chain(perf)
+            .chain(update)
+            .chain(notice)
+            .chain(assistant)
+            .min()
+        {
             Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }

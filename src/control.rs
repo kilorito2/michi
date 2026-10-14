@@ -8,29 +8,41 @@
 //! el cliente escribe una linea JSON {"cmd": ...} y recibe una linea JSON
 //! {"ok": true, ...} o {"ok": false, "error": "..."}. Los comandos CDP van
 //! por ICoreWebView2::CallDevToolsProtocolMethod de la pestana pedida: no se
-//! abre ningun puerto de depuracion y cada comando cae en la pestana justa
-//! (incognito incluida).
+//! abre ningun puerto de depuracion y cada comando cae en la pestana justa.
 //!
 //! Para encontrarlo, el principal deja `control.json` en la carpeta de datos
-//! con el nombre del pipe, su pid y la ruta del .exe. Se apaga con el ajuste
-//! "Permitir que May controle Michi" (Privacidad y seguridad).
+//! con el nombre del pipe, su pid, la ruta del .exe y el usuario dueno del
+//! pipe.
+//!
+//! Seguridad: cualquier programa de este usuario puede hablarle al pipe (no
+//! hay forma de saber que es May), y con CDP se puede leer y usar cualquier
+//! pagina, sesiones iniciadas incluidas. Por eso:
+//! - Viene apagado. La primera vez que algo se conecta, Michi le pregunta al
+//!   usuario si lo permite; despues se cambia en Ajustes > Privacidad y
+//!   seguridad ("Permitir que May controle Michi").
+//! - Nunca las paginas propias (ajustes: contrasenas, datos, extensiones):
+//!   ni navegar a ellas ni mandarles CDP. Solo direcciones web y archivos
+//!   locales (sin carpetas de red). La pestana nueva si se puede abrir.
+//! - Las pestanas de incognito del usuario no existen para el pipe: solo las
+//!   de incognito que abrio el mismo (Tab::assistant).
+//! - Mientras se usa, la barra lo muestra (window.onAssistant).
+//! - El pipe es solo de este usuario de Windows (ver pipes.rs).
 
 use std::sync::mpsc::{self, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
 use windows_core::HSTRING;
 use winit::event_loop::EventLoopProxy;
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::Storage::FileSystem::{FlushFileBuffers, ReadFile, WriteFile, PIPE_ACCESS_DUPLEX};
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
-    PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+    DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 use wry::WebViewExtWindows;
 
-use crate::state::{is_own_page, Shared, UserEvent, HOME_LOAD_URL, HOME_URL};
+use crate::state::{is_own_page, own_page_path, Shared, Tab, UserEvent, HOME_LOAD_URL, HOME_URL};
 use crate::{storage, tabs, win};
 
 /// Archivo (en la carpeta de datos) por el que los clientes encuentran el pipe.
@@ -40,6 +52,8 @@ const MAX_REQUEST: usize = 4 * 1024 * 1024;
 /// Cuanto se espera la respuesta del bucle de eventos (una captura o una
 /// pagina pesada pueden tardar).
 const REPLY_TIMEOUT: Duration = Duration::from_secs(60);
+/// Cuanto sigue el aviso de la barra despues del ultimo pedido.
+const INDICATOR_FOR: Duration = Duration::from_secs(8);
 
 /// Un pedido que llego por el pipe, para resolverlo en el hilo de la interfaz.
 #[derive(Debug, Clone)]
@@ -48,12 +62,8 @@ pub struct Request {
     pub reply: Sender<Value>,
 }
 
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
 fn pipe_name() -> String {
-    format!("\\\\.\\pipe\\Michi-control-{:016x}", crate::single_instance::install_id())
+    crate::pipes::name(&format!("Michi-control-{:016x}", crate::single_instance::install_id()))
 }
 
 /// Arranca el pipe (en su propio hilo) y deja control.json. Solo el principal.
@@ -61,30 +71,15 @@ pub fn listen(proxy: EventLoopProxy<UserEvent>) {
     let name = pipe_name();
     write_discovery(&name);
     std::thread::spawn(move || {
-        let wname = wide(&name);
+        let mut listener = crate::pipes::Listener::new(
+            &name,
+            PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            MAX_REQUEST as u32,
+            MAX_REQUEST as u32,
+        );
         loop {
-            let pipe = unsafe {
-                CreateNamedPipeW(
-                    wname.as_ptr(),
-                    PIPE_ACCESS_DUPLEX,
-                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                    PIPE_UNLIMITED_INSTANCES,
-                    MAX_REQUEST as u32,
-                    MAX_REQUEST as u32,
-                    0,
-                    std::ptr::null(),
-                )
-            };
-            if pipe == INVALID_HANDLE_VALUE {
-                std::thread::sleep(Duration::from_secs(1));
-                continue;
-            }
-            let connected =
-                unsafe { ConnectNamedPipe(pipe, std::ptr::null_mut()) } != 0 || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
-            if !connected {
-                unsafe { CloseHandle(pipe) };
-                continue;
-            }
+            let pipe = listener.accept();
             // Cada conexion en su hilo: un CDP lento no frena a los demas.
             let proxy = proxy.clone();
             let pipe = pipe as usize;
@@ -99,6 +94,9 @@ fn write_discovery(pipe: &str) {
         "pid": std::process::id(),
         "exe": std::env::current_exe().ok(),
         "version": env!("CARGO_PKG_VERSION"),
+        // Un cliente puede comprobar que el pipe sea de este usuario (como
+        // hace single_instance::forward) antes de mandar nada.
+        "owner": crate::pipes::user_sid(),
     });
     let dir = storage::data_dir();
     let _ = std::fs::create_dir_all(&dir);
@@ -163,14 +161,27 @@ fn ok(mut extra: Value) -> Value {
 /// En el hilo de la interfaz (UserEvent::Control), fuera de cualquier
 /// callback de WebView2: aca si se pueden crear y cerrar pestanas.
 pub fn handle(state: &Shared, req: Request) {
-    if !state.borrow().settings.allow_assistant {
-        let _ = req.reply.send(error("Michi tiene apagado el control desde May (Ajustes > Privacidad y seguridad)."));
-        return;
-    }
     if state.borrow().window.is_none() {
         let _ = req.reply.send(error("Michi todavía está arrancando"));
         return;
     }
+    let (allowed, asked, asking) = {
+        let st = state.borrow();
+        (st.settings.allow_assistant, st.settings.assistant_asked, st.assistant_asking)
+    };
+    if !allowed {
+        let message = if asking {
+            "Michi está esperando que el usuario permita el control desde May."
+        } else if asked {
+            "Michi tiene apagado el control desde May (Ajustes > Privacidad y seguridad)."
+        } else {
+            return ask_consent(state, req);
+        };
+        let _ = req.reply.send(error(message));
+        return;
+    }
+    show_indicator(state);
+
     let body = &req.body;
     let cmd = body.get("cmd").and_then(Value::as_str).unwrap_or("");
     let tab = body.get("tab").and_then(Value::as_u64);
@@ -186,11 +197,20 @@ pub fn handle(state: &Shared, req: Request) {
             match resolve(state, body) {
                 None => error("dirección inválida"),
                 Some(url) => {
+                    let before = state.borrow().tabs.iter().map(|t| t.id).max();
                     tabs::open_tab(state, &url, incognito);
+                    let id = {
+                        let mut st = state.borrow_mut();
+                        // La pestana recien creada (la de id mas alto) es suya.
+                        let new = st.tabs.iter_mut().filter(|t| Some(t.id) > before).max_by_key(|t| t.id);
+                        new.map(|t| {
+                            t.assistant = true;
+                            t.id
+                        })
+                    };
                     if body.get("focus").and_then(Value::as_bool).unwrap_or(true) {
                         win::force_to_front();
                     }
-                    let id = state.borrow().active_tab().map(|t| t.id);
                     ok(json!({ "id": id, "url": url }))
                 }
             }
@@ -252,6 +272,10 @@ pub fn handle(state: &Shared, req: Request) {
             match core_of(state, tab) {
                 None => error("no existe esa pestaña"),
                 Some(_) if method.is_empty() => error("falta el método"),
+                Some((id, _)) if !cdp_allowed(state, id) => {
+                    error("Michi no deja controlar sus páginas internas (ajustes, avisos) desde otro programa.")
+                }
+                Some(_) if !navigation_allowed(&method, &params) => error("dirección inválida"),
                 Some((_, core)) => {
                     // La respuesta llega despues, en el callback.
                     call_cdp(&core, &method, &params, req.reply);
@@ -262,6 +286,78 @@ pub fn handle(state: &Shared, req: Request) {
         _ => error("comando desconocido"),
     };
     let _ = req.reply.send(response);
+}
+
+/// La primera vez que algo se conecta: le pregunta al usuario (en otro hilo,
+/// el cuadro es modal). El pedido espera la respuesta (ver on_consent).
+fn ask_consent(state: &Shared, req: Request) {
+    let proxy = {
+        let mut st = state.borrow_mut();
+        st.assistant_asking = true;
+        st.proxy.clone()
+    };
+    let Some(proxy) = proxy else { return };
+    win::force_to_front();
+    std::thread::spawn(move || {
+        let yes = rfd::MessageDialog::new()
+            .set_parent(&crate::win::Owner)
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Control desde otro programa")
+            .set_description(
+                "Un programa de este equipo (May, la asistente de voz, u otro que diga serlo) quiere controlar \
+                 Michi: abrir y cerrar pestañas, y leer y usar las páginas que abras, con tus sesiones iniciadas.\n\n\
+                 ¿Lo permites? Se puede cambiar cuando quieras en Ajustes > Privacidad y seguridad.",
+            )
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show()
+            == rfd::MessageDialogResult::Yes;
+        let _ = proxy.send_event(UserEvent::AssistantConsent(yes, req));
+    });
+}
+
+/// La respuesta del usuario: queda guardada (no se vuelve a preguntar) y se
+/// atiende el pedido que esperaba.
+pub fn on_consent(state: &Shared, allowed: bool, req: Request) {
+    {
+        let mut st = state.borrow_mut();
+        st.assistant_asking = false;
+        st.settings.allow_assistant = allowed;
+        st.settings.assistant_asked = true;
+        st.save_settings();
+    }
+    crate::sync::push_own_pages(state);
+    handle(state, req);
+}
+
+/// La barra muestra que May esta usando Michi, hasta INDICATOR_FOR despues
+/// del ultimo pedido.
+fn show_indicator(state: &Shared) {
+    let was_off = {
+        let mut st = state.borrow_mut();
+        st.assistant_until.replace(Instant::now() + INDICATOR_FOR).is_none()
+    };
+    if was_off {
+        push_indicator(state, true);
+    }
+    state.borrow().wake();
+}
+
+fn push_indicator(state: &Shared, on: bool) {
+    let st = state.borrow();
+    if let Some(tb) = &st.topbar {
+        let _ = tb.evaluate_script(&format!("window.onAssistant && window.onAssistant({on})"));
+    }
+}
+
+/// Desde el bucle de eventos: apaga el aviso de la barra a su hora.
+pub fn tick(state: &Shared) -> Option<Instant> {
+    let until = state.borrow().assistant_until?;
+    if Instant::now() < until {
+        return Some(until);
+    }
+    state.borrow_mut().assistant_until = None;
+    push_indicator(state, false);
+    None
 }
 
 /// "search": lo que se busca con el buscador elegido. "url": texto escrito
@@ -277,9 +373,41 @@ fn resolve(state: &Shared, body: &Value) -> Option<String> {
         return Some(HOME_URL.to_string());
     }
     let url = storage::resolve_input(input, &engine)?;
+    is_allowed_target(&url).then_some(url)
+}
+
+/// Adonde se puede llevar una pestana desde el pipe: la web y archivos de
+/// este equipo. Nunca codigo (javascript:, data:), nuestras paginas internas
+/// ni una carpeta de red (file://servidor/..., que le manda la credencial de
+/// Windows a ese servidor).
+fn is_allowed_target(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
-    // Nada que ejecute codigo en la pagina por la barra.
-    (!lower.starts_with("javascript:") && !lower.starts_with("data:")).then_some(url)
+    (lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("file:///")) && !is_own_page(url)
+}
+
+/// Page.navigate por CDP: con el mismo filtro que "navigate".
+fn navigation_allowed(method: &str, params: &Value) -> bool {
+    if method != "Page.navigate" {
+        return true;
+    }
+    params.get("url").and_then(Value::as_str).is_some_and(is_allowed_target)
+}
+
+/// Si se le puede mandar CDP a esa pestana: no si muestra (o esta yendo a)
+/// una pagina propia que no sea la pestana nueva. Lo de "esta yendo" importa:
+/// un `location = ...` por CDP seguido enseguida de otro comando caeria en la
+/// pagina nueva.
+fn cdp_allowed(state: &Shared, id: u64) -> bool {
+    let st = state.borrow();
+    let Some(t) = st.tabs.iter().find(|t| t.id == id) else { return false };
+    let internal = |url: &str| own_page_path(url).is_some_and(|p| p != "/");
+    !internal(&t.url) && !internal(&t.sec.nav_target)
+}
+
+/// Las pestanas que el pipe puede ver: todas menos las de incognito que abrio
+/// el usuario.
+fn visible(t: &Tab) -> bool {
+    !t.incognito || t.assistant
 }
 
 fn tabs_json(state: &Shared) -> Value {
@@ -288,6 +416,7 @@ fn tabs_json(state: &Shared) -> Value {
         .tabs
         .iter()
         .enumerate()
+        .filter(|(_, t)| visible(t))
         .map(|(i, t)| {
             json!({
                 "id": t.id,
@@ -301,16 +430,18 @@ fn tabs_json(state: &Shared) -> Value {
             })
         })
         .collect();
-    json!({ "tabs": list, "active": st.active_tab().map(|t| t.id) })
+    let active = st.active_tab().filter(|t| visible(t)).map(|t| t.id);
+    json!({ "tabs": list, "active": active })
 }
 
-/// Indice de la pestana (None = la del frente).
+/// Indice de la pestana (None = la del frente), si el pipe la puede ver.
 fn find(state: &Shared, tab: Option<u64>) -> Option<usize> {
     let st = state.borrow();
-    match tab {
-        None => (!st.tabs.is_empty()).then_some(st.active),
-        Some(id) => st.tabs.iter().position(|t| t.id == id),
-    }
+    let i = match tab {
+        None => (!st.tabs.is_empty()).then_some(st.active)?,
+        Some(id) => st.tabs.iter().position(|t| t.id == id)?,
+    };
+    visible(&st.tabs[i]).then_some(i)
 }
 
 /// El puntero COM de la pestana: el prestamo de `state` se suelta antes de
@@ -351,5 +482,28 @@ fn call_cdp(
     };
     if let Err(e) = started {
         let _ = reply.send(error(&e.message()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pipe_only_reaches_the_web_and_local_files() {
+        assert!(is_allowed_target("https://example.com/"));
+        assert!(is_allowed_target("http://localhost:3000/"));
+        assert!(is_allowed_target("file:///C:/Users/ana/notas.html"));
+        assert!(!is_allowed_target("file://servidor/carpeta/x.html"));
+        assert!(!is_allowed_target("http://app.localhost/settings"));
+        assert!(!is_allowed_target("app://localhost/settings"));
+        assert!(!is_allowed_target("javascript:alert(1)"));
+        assert!(!is_allowed_target("data:text/html,hola"));
+        assert!(!is_allowed_target("chrome-extension://abc/opciones.html"));
+
+        assert!(navigation_allowed("Runtime.evaluate", &json!({ "expression": "1" })));
+        assert!(navigation_allowed("Page.navigate", &json!({ "url": "https://example.com/" })));
+        assert!(!navigation_allowed("Page.navigate", &json!({ "url": "http://app.localhost/settings" })));
+        assert!(!navigation_allowed("Page.navigate", &json!({})));
     }
 }

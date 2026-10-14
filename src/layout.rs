@@ -61,6 +61,7 @@ pub fn relayout(state: &Shared) {
     drop(st);
     position_panels(state);
     crate::menu::relayout(state);
+    crate::notice::relayout(state);
     raise_chrome(state);
 }
 
@@ -103,6 +104,10 @@ pub fn raise_chrome(state: &Shared) {
     }
     if let Some(p) = &st.ext_popup {
         raise(&p.webview);
+    }
+    // El aviso de pantalla completa, sobre todo lo demas.
+    if let (Some(n), true) = (&st.notice, st.notice_until.is_some()) {
+        raise(n);
     }
 }
 

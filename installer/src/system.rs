@@ -149,9 +149,10 @@ pub fn register_browser(exe: &Path) -> Result<(), String> {
     for (class, name) in [(URL_CLASS, "Direccion web (Michi)"), (HTML_CLASS, "Pagina web (Michi)")] {
         let root = format!("Software\\Classes\\{class}");
         reg_set(&root, None, Value::Str(name))?;
-        if class == URL_CLASS {
-            reg_set(&root, Some("URL Protocol"), Value::Str(""))?;
-        }
+        // Sin "URL Protocol": con el, "MichiURL:" pasaba a ser un esquema que
+        // cualquier pagina web podia invocar (para http/https alcanza con la
+        // clase). Las instalaciones anteriores lo dejaron: se borra.
+        reg_delete_value(&root, "URL Protocol");
         reg_set(&format!("{root}\\DefaultIcon"), None, Value::Str(&icon))?;
         reg_set(&format!("{root}\\shell\\open\\command"), None, Value::Str(&open))?;
     }

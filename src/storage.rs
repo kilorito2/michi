@@ -143,8 +143,13 @@ pub struct Settings {
     /// Modo de rendimiento (ver perf.rs): "normal" | "optimized" | "super".
     pub performance: String,
     /// Dejar que May (la asistente de voz) controle Michi por el pipe de
-    /// control: pestanas, navegacion y la pagina (ver control.rs).
+    /// control: pestanas, navegacion y la pagina (ver control.rs). Apagado
+    /// hasta que el usuario lo permite: cualquier programa del equipo puede
+    /// hablarle a ese pipe.
     pub allow_assistant: bool,
+    /// Ya se le pregunto al usuario si May puede controlar Michi (la primera
+    /// vez que se conecto), o lo decidio el en Ajustes: no se vuelve a preguntar.
+    pub assistant_asked: bool,
     /// Ofrecer guardar las contrasenas que se escriben en los sitios (y
     /// completarlas solas la proxima vez). Lo guarda el perfil de WebView2.
     pub save_passwords: bool,
@@ -171,7 +176,8 @@ impl Default for Settings {
             blocked_permissions: Vec::new(),
             search_suggestions: true,
             performance: "normal".into(),
-            allow_assistant: true,
+            allow_assistant: false,
+            assistant_asked: false,
             save_passwords: true,
             autofill: true,
             check_updates: true,

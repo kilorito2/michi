@@ -112,6 +112,9 @@ pub struct Tab {
     pub group: Option<u64>,
     /// "Guardar la contrasena?" esperando respuesta (ver passwords.rs).
     pub password_offer: Option<crate::passwords::Offer>,
+    /// La abrio May por el pipe de control (ver control.rs): si es de
+    /// incognito, May la puede leer; las de incognito del usuario, no.
+    pub assistant: bool,
 }
 
 /// Un grupo de pestanas: un nombre y un color en el panel, que se puede
@@ -183,6 +186,9 @@ pub enum UserEvent {
     /// Un pedido de May (u otra app del usuario) por el pipe de control: se
     /// resuelve aca, en el hilo de la interfaz (ver control.rs).
     Control(crate::control::Request),
+    /// El usuario contesto si May puede controlar Michi (la primera vez que se
+    /// conecto): el pedido que esperaba la respuesta (ver control.rs).
+    AssistantConsent(bool, crate::control::Request),
     /// La pagina de esa pestana no respondia y el usuario eligio volver a
     /// cargarla (ver recovery.rs).
     ReloadHung(u64),
@@ -348,6 +354,9 @@ pub struct AppState {
     /// Desplegable de sugerencias de la barra de direcciones (ver suggest.rs).
     pub suggest: crate::suggest::Suggest,
     pub ext_popup: Option<ExtPopup>,
+    /// Aviso de pantalla completa (ver notice.rs) y hasta cuando se ve.
+    pub notice: Option<WebView>,
+    pub notice_until: Option<Instant>,
     /// Que popup se cerro y cuando (ver popup::toggle).
     pub ext_popup_closed: Option<(String, Instant)>,
 
@@ -431,6 +440,10 @@ pub struct AppState {
     pub groups: Vec<TabGroup>,
     /// Contrasenas guardadas (ver passwords.rs).
     pub passwords: crate::passwords::Passwords,
+    /// Preguntando si May puede controlar Michi (ver control.rs).
+    pub assistant_asking: bool,
+    /// Hasta cuando la barra muestra que May esta usando Michi (ver control.rs).
+    pub assistant_until: Option<Instant>,
 
     next_id: u64,
 }
@@ -450,6 +463,8 @@ impl AppState {
             menu_closed_at: None,
             suggest: crate::suggest::Suggest::load(),
             ext_popup: None,
+            notice: None,
+            notice_until: None,
             ext_popup_closed: None,
             tabs: Vec::new(),
             active: 0,
@@ -483,6 +498,8 @@ impl AppState {
             background_chain: None,
             groups: Vec::new(),
             passwords: crate::passwords::Passwords::load(),
+            assistant_asking: false,
+            assistant_until: None,
 
             next_id: 1,
         }

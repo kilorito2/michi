@@ -265,6 +265,9 @@ deja verlas ni administrarlas):
   cuenta de la PC, o el archivo copiado a otra PC, no las puede leer. Solo se
   ofrece guardar en sitios con conexión segura (HTTPS), y una página solo puede
   ofrecer contraseñas de su propio sitio.
+- Lo que no protege (igual que en Chrome o Edge): un programa que corre con tu
+  mismo usuario de Windows sí puede descifrarlas, y Windows Hello frena a otra
+  persona sentada frente a tu sesión abierta, no a un programa.
 
 <p align="center">
   <img src="docs/img/contrasenas.jpg" alt="Ajustes, Contraseñas: la lista de sitios con su usuario y la contraseña oculta, con botones para mostrar, copiar, editar y borrar" width="100%">
@@ -297,9 +300,13 @@ Al iniciar (y como mucho dos veces por día) Michi le pregunta a GitHub cuál es
 la última versión publicada. Si hay una más nueva, aparece **Actualizar** en la
 barra, y en **Ajustes › Acerca de** el botón **Descargar e instalar**: baja el
 instalador por HTTPS desde GitHub, comprueba que su tamaño y su huella SHA-256
-sean los que publica GitHub para ese archivo, lo abre y Michi se cierra para que
-pueda reemplazarlo. Nada se descarga ni se instala sin que lo pidas, y la
-búsqueda automática se apaga en el mismo lugar (*Buscar ahora* sigue andando).
+sean los que publica GitHub para ese archivo y que venga **firmado con la clave
+de Michi** (su `.sig`; la clave pública va dentro de Michi y la privada no está
+en GitHub), lo abre y Michi se cierra para que pueda reemplazarlo. Si la firma
+falta o no coincide, no se abre: así, ni quien se quedara con la cuenta de
+GitHub podría colar un instalador. Nada se descarga ni se instala sin que lo
+pidas, y la búsqueda automática se apaga en el mismo lugar (*Buscar ahora*
+sigue andando).
 
 <p align="center">
   <img src="docs/img/actualizaciones.jpg" alt="Ajustes, Acerca de: Michi 0.1.7, Actualizaciones: Michi está al día, y el interruptor para buscar al iniciar" width="100%">
@@ -340,10 +347,14 @@ búsqueda automática se apaga en el mismo lugar (*Buscar ahora* sigue andando).
   pedido se abre en **una pestaña nueva de esa misma ventana**, que pasa al
   frente: nunca un segundo navegador.
 - **Lo controla May**: May, la asistente de voz del mismo autor, usa Michi
-  como su navegador. Por un pipe local (nunca desde la red) puede listar,
-  abrir, cambiar y cerrar pestañas, leer la página, hacer clic, escribir y
-  sacar capturas, con los comandos DevTools de cada pestaña y sin abrir un
-  puerto de depuración. Se apaga en Ajustes > Privacidad y seguridad.
+  como su navegador. Por un pipe local (nunca desde la red, y solo de tu
+  usuario de Windows) puede listar, abrir, cambiar y cerrar pestañas, leer la
+  página, hacer clic, escribir y sacar capturas, con los comandos DevTools de
+  cada pestaña y sin abrir un puerto de depuración. Viene **apagado**: la
+  primera vez que se conecta, Michi pregunta si lo permites (después se cambia
+  en Ajustes > Privacidad y seguridad). Nunca llega a las páginas internas
+  (ajustes, contraseñas) ni a tus pestañas de incógnito, solo a las que abre
+  May, y mientras lo usa la barra muestra **May**.
 - **Zoom por sitio**: si agrandas un sitio al 125%, todas sus páginas abren al
   125%, en esa pestaña y en las próximas (como en Chrome). Al volver al
   predeterminado, el sitio se olvida; en **Ajustes › Apariencia** se olvidan
@@ -414,12 +425,14 @@ estándar.
 | :-: | --- | --- |
 | <img src="docs/icons/seguridad.svg" width="20" height="20" alt=""> | **SmartScreen** | Filtro de Microsoft contra phishing, malware y descargas peligrosas. La librería base (wry) lo apaga por defecto; Michi lo enciende en todas sus vistas. |
 | <img src="docs/icons/https.svg" width="20" height="20" alt=""> | **HTTPS primero** | Intenta siempre la conexión cifrada (ver arriba). |
-| <img src="docs/icons/ventanas.svg" width="20" height="20" alt=""> | **Bloqueo de ventanas emergentes** | Una pestaña nueva solo si la pide un clic. Nunca hacia archivos locales, `data:`, `javascript:` ni páginas internas. Las que abre una página con un clic conservan su `window.opener`, así los inicios de sesión en ventana emergente ("Continuar con Google") funcionan. |
+| <img src="docs/icons/ventanas.svg" width="20" height="20" alt=""> | **Bloqueo de ventanas emergentes** | Una pestaña nueva solo si la pide un clic. Nunca hacia archivos locales, `data:`, `javascript:` ni páginas internas (tampoco con *Abrir enlace en una pestaña nueva* del clic derecho). Las que abre una página con un clic conservan su `window.opener`, así los inicios de sesión en ventana emergente ("Continuar con Google") funcionan. |
+| <img src="docs/icons/pestanas.svg" width="20" height="20" alt=""> | **Aviso de pantalla completa** | Cuando un sitio ocupa toda la pantalla, Michi dice cuál es y cómo salir (<kbd>Esc</kbd>): un sitio no puede dibujar una barra falsa con otra dirección sin que se note. |
 | <img src="docs/icons/apps-externas.svg" width="20" height="20" alt=""> | **Aplicaciones externas** | Siempre se bloquean los esquemas con historial de ataques (`ms-msdt:`, `search-ms:`, `ms-officecmd:`, `ms-appinstaller:`, `hcp:`…) y cualquier otro que una página intente abrir sin un clic. |
 | <img src="docs/icons/permisos.svg" width="20" height="20" alt=""> | **Permisos** | Bloquear cámara, micrófono, ubicación, etc. para todos los sitios; nunca a sitios sin HTTPS; notificaciones solo después de un clic; lista de lo que tiene guardado cada sitio. |
 | <img src="docs/icons/descargas.svg" width="20" height="20" alt=""> | **Descargas peligrosas** | Ejecutables, scripts y accesos directos esperan tu decisión; imágenes, PDF, documentos o `.zip` se descargan sin preguntar. Lo que frena SmartScreen queda "Bloqueado". |
 | <img src="docs/icons/marca-web.svg" width="20" height="20" alt=""> | **Marca de la Web** | Todo lo descargado lleva `Zone.Identifier`: Windows lo revisa antes de ejecutarlo y Office lo abre en Vista protegida. |
-| <img src="docs/icons/firma.svg" width="20" height="20" alt=""> | **Firma de extensiones** | Los `.crx` se verifican como en Chrome (CRX3, RSA/ECDSA) y tienen que ser exactamente la extensión pedida. |
+| <img src="docs/icons/firma.svg" width="20" height="20" alt=""> | **Firma de extensiones** | Los `.crx` se verifican como en Chrome (CRX3, RSA/ECDSA), tienen que ser exactamente la extensión pedida y nunca una versión más vieja que la instalada. |
+| <img src="docs/icons/actualizar.svg" width="20" height="20" alt=""> | **Actualizaciones firmadas** | Un instalador descargado solo se abre con la firma de la clave de Michi (Ed25519), además de la huella de GitHub. |
 | <img src="docs/icons/zip.svg" width="20" height="20" alt=""> | **Anti *zip bomba*** | Las extensiones se descomprimen con topes (512 MB, 20 000 archivos) en una carpeta temporal. |
 | <img src="docs/icons/paginas-internas.svg" width="20" height="20" alt=""> | **Páginas internas blindadas** | CSP con *nonce*, sin poder mostrarse dentro de un iframe ajeno, y `Cross-Origin-Resource-Policy`. |
 | <img src="docs/icons/ipc.svg" width="20" height="20" alt=""> | **IPC verificado** | Los comandos solo se aceptan según la URL real de la página que los envía (la pone WebView2, no se puede falsear), y cada página solo tiene los que usa. |
@@ -474,7 +487,10 @@ estándar.
 - CRX3: todas las firmas tienen que ser válidas y una de las claves tiene que
   ser la que da el id de la extensión. Es lo que protege la descarga:
   Complementos de Edge entrega los paquetes por HTTP, sin cifrar.
-- Los `.zip` y las carpetas se marcan como "sin firma" en la confirmación.
+- Una versión de la tienda más vieja que la instalada no se instala: alguien
+  en la red podría servir una anterior, auténtica, con fallas ya arregladas.
+- Los `.zip` y las carpetas se marcan como "sin firma" en la confirmación, y un
+  `.crx` del disco como "firmado por su autor": cualquiera puede firmar el suyo.
 - Si la tienda descarga un `.crx` (su propio botón de agregar), la descarga se
   cancela y el paquete se vuelve a pedir a la tienda oficial por su id: nunca
   se instala lo que haya entregado la página.
@@ -601,6 +617,14 @@ powershell -ExecutionPolicy Bypass -File tools\build_installer.ps1
 Genera **`dist\Michi-Setup-<versión>.exe`** (~39 MB, un solo archivo):
 compila en *release* el navegador y el instalador (`installer/`) y le pega al
 final del instalador el `.exe` y los fondos, con el SHA-256 de cada uno.
+Después lo firma para las actualizaciones (`dist\Michi-Setup-<versión>.exe.sig`,
+con [`tools/firmar`](tools/firmar)): en la versión de GitHub se publican **los
+dos archivos**, o Michi no la instala desde *Actualizar*.
+
+La clave privada está en `%USERPROFILE%\.michi\clave-actualizaciones.pk8` (o
+donde diga `MICHI_CLAVE_FIRMA`), nunca en el repositorio. Guarda una copia: si
+se pierde, las versiones nuevas no se pueden firmar y hay que publicar una con
+otra clave pública que los usuarios instalen a mano.
 
 ```text
 ┌────────────────┬──────────────┬─────┬──────────────┬───────────────┬──────────┬──────────┐
@@ -703,6 +727,7 @@ src/
   panels.rs       apertura/cierre animado de los paneles + vigilante del cursor
   actions.rs      acciones diferidas (atajos, menú) fuera de los callbacks
   control.rs      pipe de control para May: pestañas, navegación y comandos CDP
+  pipes.rs        pipes con nombre solo para tu usuario de Windows
   shortcuts.rs    atajos de teclado (AcceleratorKeyPressed de WebView2)
   extensions.rs   instalar/listar/activar/quitar extensiones
   crx.rs          verificar la firma de los paquetes .crx (CRX3)
@@ -712,6 +737,7 @@ src/
   suggest.rs      sugerencias de la barra: completar en línea, buscador, historial
   library.rs      panel izquierdo: carpetas de marcadores, buscar en el historial
   context_menu.rs menú del clic derecho de las páginas
+  notice.rs       aviso de pantalla completa
   zoom.rs         zoom por sitio
   recovery.rs     página caída, página colgada, reabrir si se cae WebView2
   passwords.rs    gestor de contraseñas (DPAPI, Windows Hello, rellenar)
@@ -736,6 +762,7 @@ ui/
   newtab.html         pestaña nueva
   insecure.html       aviso "este sitio no admite conexiones seguras"
   crashed.html        "esta página dejó de funcionar"
+  notice.html         aviso "<sitio> está en pantalla completa"
   ext_popup.js        se inyecta en el popup de una extensión
   content_init.js     se inyecta en cada pestaña
   wallpaper.js        fondo animado compartido
@@ -750,7 +777,8 @@ installer/            el instalador
 tools/
   encode_wallpapers.sh  genera assets/wallpapers/optimized/
   make_icon.ps1         genera michi.ico y michi-256.png
-  build_installer.ps1   genera dist\Michi-Setup-<versión>.exe
+  build_installer.ps1   genera dist\Michi-Setup-<versión>.exe (y su .sig)
+  firmar/               firma los instaladores para las actualizaciones
 assets/icon/          el zorro: original, .ico y logo
 docs/img/             imágenes de este README
 ```

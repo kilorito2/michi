@@ -60,16 +60,22 @@ fn open(state: &Shared, id: String, right: f64) {
     let (window, target) = {
         let st = state.borrow();
         let Some(window) = st.window.clone() else { return };
-        (window, st.active_tab().map(|t| t.url.clone()).unwrap_or_default())
+        // La direccion de una pestana de incognito no se le da a la extension:
+        // en Chrome, una extension no ve las de incognito salvo que el usuario
+        // se lo permita.
+        let target = st.active_tab().filter(|t| !t.incognito).map(|t| t.url.clone()).unwrap_or_default();
+        (window, target)
     };
     let script = include_str!("../ui/ext_popup.js")
         .replace("__TARGET_URL__", &serde_json::to_string(&target).unwrap_or_else(|_| "\"\"".into()));
 
     let s_ipc = state.clone();
     let s_new = state.clone();
+    let s_nav = state.clone();
     // Solo se le atiende el IPC a la propia extension: si el popup navega a
     // una pagina web, esa pagina no puede ni cambiarle el tamano.
     let origin = format!("chrome-extension://{id}/");
+    let (origin_new, origin_nav) = (origin.clone(), origin.clone());
     let webview = security::base_builder()
         .with_devtools(true)
         .with_visible(false)
@@ -81,13 +87,28 @@ fn open(state: &Shared, id: String, right: f64) {
                 from_page(&s_ipc, req.body());
             }
         })
+        // El popup solo muestra paginas de su extension. Un enlace a otro lado
+        // (su sitio, la ayuda) va a una pestana, que tiene todas las
+        // protecciones (HTTPS primero, permisos, descargas...); este WebView no.
+        .with_navigation_handler(move |url| {
+            if url.starts_with(&origin_nav) || url == "about:blank" {
+                return true;
+            }
+            let mut st = s_nav.borrow_mut();
+            if security::popup_target_allowed(&url, &origin_nav) {
+                let incognito = st.active_is_incognito();
+                st.request_tab_in(&url, incognito);
+            }
+            st.request(Action::ClosePopup);
+            false
+        })
         .with_new_window_req_handler(move |url, _| {
             // Enlaces del popup que abren pestana (ayuda, panel de la
             // extension...). Con el mismo filtro que las pestanas (ver
             // security::popup_target_allowed): nada de archivos locales,
-            // data: ni paginas internas.
+            // data:, paginas internas ni las de OTRA extension.
             let mut st = s_new.borrow_mut();
-            if url.starts_with("chrome-extension://") || security::popup_target_allowed(&url, "") {
+            if security::popup_target_allowed(&url, &origin_new) {
                 // El popup actua sobre la pestana al frente: si es de incognito,
                 // lo que abre tambien.
                 let incognito = st.active_is_incognito();
@@ -99,6 +120,10 @@ fn open(state: &Shared, id: String, right: f64) {
         .build_as_child(window.as_ref());
     let Ok(webview) = webview else { return };
     security::harden(state, &webview);
+    // Las mismas reglas que una pestana para pedir permisos y abrir
+    // aplicaciones externas.
+    crate::permissions::attach(state, &webview);
+    security::guard_external_schemes(&wry::WebViewExtWindows::webview(&webview));
     shortcuts::attach(state, &webview, false);
 
     state.borrow_mut().ext_popup = Some(ExtPopup { id, webview, right, sized: false });

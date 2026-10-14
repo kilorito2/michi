@@ -196,3 +196,30 @@ pub fn restored_size(event_loop: &winit::event_loop::ActiveEventLoop) -> (f64, f
     let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
     ((size.width * 0.9).min(1280.0), (size.height * 0.9).min(800.0))
 }
+
+/// Abre la carpeta del archivo en el Explorador con el archivo seleccionado.
+/// Por la API del Shell y no con `explorer /select,<ruta>`: explorer separa
+/// sus argumentos por comas, y un archivo descargado con una coma en el
+/// nombre ("foto,algo.exe") le podia colar un argumento de mas. En su propio
+/// hilo (con COM): el Explorador puede tardar en responder.
+#[cfg(windows)]
+pub fn show_in_folder(path: &std::path::Path) {
+    use windows_sys::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use windows_sys::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems};
+
+    let wide: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+    std::thread::spawn(move || unsafe {
+        let com = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
+        let item = ILCreateFromPathW(wide.as_ptr());
+        if !item.is_null() {
+            SHOpenFolderAndSelectItems(item, 0, std::ptr::null(), 0);
+            ILFree(item);
+        }
+        if com >= 0 {
+            CoUninitialize();
+        }
+    });
+}
+
+#[cfg(not(windows))]
+pub fn show_in_folder(_path: &std::path::Path) {}

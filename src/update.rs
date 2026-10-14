@@ -8,8 +8,14 @@
 //! - Si hay una mas nueva, la barra muestra "Actualizar" y Ajustes > Acerca de
 //!   ofrece "Descargar e instalar". Nada se descarga ni se instala solo.
 //! - El instalador se descarga por HTTPS desde GitHub y se compara con el
-//!   tamano y la huella SHA-256 que publica GitHub para ese archivo. Despues
-//!   se abre, y Michi se cierra para que pueda reemplazarlo.
+//!   tamano y la huella SHA-256 que publica GitHub para ese archivo.
+//! - Y tiene que venir firmado (su `.sig` en la misma version) con la clave
+//!   de quien publica Michi, cuya parte publica va adentro de este programa
+//!   (UPDATE_KEY; ver tools/firmar). La huella sola no alcanza: viene del
+//!   mismo lugar que el archivo, y quien se quedara con la cuenta o el
+//!   repositorio podia publicar un instalador cualquiera con su huella. La
+//!   clave privada no esta en GitHub. Sin firma valida, no se abre.
+//! - Despues se abre, y Michi se cierra para que pueda reemplazarlo.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -29,6 +35,14 @@ const CHECK_EVERY: u64 = 12 * 60 * 60;
 const FIRST_DELAY: Duration = Duration::from_secs(8);
 /// Tope de lo que se acepta descargar (el instalador pesa unas decenas de MB).
 const MAX_SIZE: u64 = 1024 * 1024 * 1024;
+/// Clave publica (Ed25519) con la que se firman los instaladores (ver
+/// tools/firmar: `michi-firmar clave` la genero).
+const UPDATE_KEY: [u8; 32] = [
+    0xa1, 0x38, 0x13, 0x08, 0xc9, 0xc3, 0x69, 0x0f, 0x09, 0x5f, 0x97, 0x38, 0xf7, 0x7b, 0x87, 0x7d, 0x6c, 0x9d, 0x41,
+    0x9b, 0xc9, 0xc5, 0x81, 0x44, 0xd6, 0x32, 0x03, 0x0a, 0x62, 0x43, 0x86, 0x32,
+];
+/// Lo que se firma antes de la huella del instalador (igual en tools/firmar).
+const SIGNATURE_CONTEXT: &[u8] = b"Michi-actualizacion-v1\0";
 
 /// Una version publicada en GitHub.
 #[derive(Clone, Debug)]
@@ -41,6 +55,8 @@ pub struct Release {
     pub size: u64,
     /// Huella SHA-256 del instalador, en hexadecimal (si GitHub la da).
     pub sha256: Option<String>,
+    /// La firma del instalador ("<instalador>.sig" en la misma version).
+    pub signature_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -164,17 +180,25 @@ fn parse_release(json: &Value) -> Option<Release> {
     if !asset_url.starts_with("https://github.com/") {
         return None;
     }
+    let asset_name = asset.get("name")?.as_str()?.to_string();
+    let signature_name = format!("{asset_name}.sig");
+    let signature_url = json.get("assets")?.as_array()?.iter().find_map(|a| {
+        let name = a.get("name")?.as_str()?;
+        let url = a.get("browser_download_url")?.as_str()?;
+        (name == signature_name && url.starts_with("https://github.com/")).then(|| url.to_string())
+    });
     Some(Release {
         version,
         page: json.get("html_url").and_then(Value::as_str).unwrap_or_default().to_string(),
         asset_url,
-        asset_name: asset.get("name")?.as_str()?.to_string(),
+        asset_name,
         size: asset.get("size").and_then(Value::as_u64).unwrap_or(0),
         sha256: asset
             .get("digest")
             .and_then(Value::as_str)
             .and_then(|d| d.strip_prefix("sha256:"))
             .map(|h| h.to_ascii_lowercase()),
+        signature_url,
     })
 }
 
@@ -283,11 +307,35 @@ fn download(release: &Release, progress: &dyn Fn(f64)) -> Result<PathBuf, String
     if release.size > 0 && done != release.size {
         return fail("La descarga quedó incompleta");
     }
-    let hex: String = hash.finish().as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    let digest = hash.finish();
+    let hex: String = digest.as_ref().iter().map(|b| format!("{b:02x}")).collect();
     if release.sha256.as_ref().is_some_and(|expected| *expected != hex) {
         return fail("El instalador descargado no coincide con el publicado: no se abrió");
     }
+    let Some(signature) = release.signature_url.as_deref().and_then(fetch_signature) else {
+        return fail("La versión nueva no trae su firma: no se abrió el instalador");
+    };
+    if !signature_ok(&UPDATE_KEY, digest.as_ref(), &signature) {
+        return fail("La firma del instalador no es la de Michi: no se abrió");
+    }
     Ok(path)
+}
+
+/// El .sig de la version (unos pocos bytes en base64).
+fn fetch_signature(url: &str) -> Option<String> {
+    let response = agent().get(url).call().ok()?;
+    let mut body = String::new();
+    response.into_reader().take(4096).read_to_string(&mut body).ok()?;
+    Some(body)
+}
+
+/// Si `signature` (base64) es la firma de `public_key` sobre la huella
+/// SHA-256 `digest` del instalador (ver tools/firmar).
+fn signature_ok(public_key: &[u8], digest: &[u8], signature: &str) -> bool {
+    use base64::Engine;
+    let Ok(sig) = base64::engine::general_purpose::STANDARD.decode(signature.trim()) else { return false };
+    let message = [SIGNATURE_CONTEXT, digest].concat();
+    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, public_key).verify(&message, &sig).is_ok()
 }
 
 /// Lo que muestran Ajustes > Acerca de y la barra.
@@ -347,6 +395,11 @@ mod tests {
                     "browser_download_url": "https://github.com/kilorito2/michi/releases/download/v0.2.0/Michi-Setup-0.2.0.exe",
                     "size": 1234,
                     "digest": "sha256:ABCDEF"
+                },
+                {
+                    "name": "Michi-Setup-0.2.0.exe.sig",
+                    "browser_download_url": "https://github.com/kilorito2/michi/releases/download/v0.2.0/Michi-Setup-0.2.0.exe.sig",
+                    "size": 89
                 }
             ]
         });
@@ -355,11 +408,51 @@ mod tests {
         assert_eq!(r.asset_name, "Michi-Setup-0.2.0.exe");
         assert_eq!(r.size, 1234);
         assert_eq!(r.sha256.as_deref(), Some("abcdef"));
+        assert!(r.signature_url.as_deref().is_some_and(|u| u.ends_with("Michi-Setup-0.2.0.exe.sig")));
+
+        // Sin .sig la version se ve, pero el instalador no se va a abrir.
+        let mut unsigned = json.clone();
+        unsigned["assets"].as_array_mut().unwrap().pop();
+        assert_eq!(parse_release(&unsigned).unwrap().signature_url, None);
 
         // Un instalador que no se baja de github.com no se acepta.
         let mut evil = json.clone();
         evil["assets"][1]["browser_download_url"] = "https://malo.com/Michi-Setup.exe".into();
         assert!(parse_release(&evil).is_none());
+    }
+
+    #[test]
+    fn only_installers_signed_with_the_key_are_opened() {
+        use base64::Engine;
+        use ring::signature::{Ed25519KeyPair, KeyPair};
+        let rng = ring::rand::SystemRandom::new();
+        let pair = Ed25519KeyPair::from_pkcs8(Ed25519KeyPair::generate_pkcs8(&rng).unwrap().as_ref()).unwrap();
+        let other = Ed25519KeyPair::from_pkcs8(Ed25519KeyPair::generate_pkcs8(&rng).unwrap().as_ref()).unwrap();
+        let digest = ring::digest::digest(&ring::digest::SHA256, b"instalador");
+        let b64 = |sig: ring::signature::Signature| base64::engine::general_purpose::STANDARD.encode(sig.as_ref());
+        let message = [SIGNATURE_CONTEXT, digest.as_ref()].concat();
+        let good = b64(pair.sign(&message));
+
+        assert!(signature_ok(pair.public_key().as_ref(), digest.as_ref(), &format!("{good}\n")));
+        // Otra clave, otro archivo, o una firma rota: no.
+        assert!(!signature_ok(other.public_key().as_ref(), digest.as_ref(), &good));
+        let other_file = ring::digest::digest(&ring::digest::SHA256, b"otro");
+        assert!(!signature_ok(pair.public_key().as_ref(), other_file.as_ref(), &good));
+        assert!(!signature_ok(pair.public_key().as_ref(), digest.as_ref(), "no es base64"));
+        // La firma del mismo hash sin el contexto tampoco sirve.
+        assert!(!signature_ok(pair.public_key().as_ref(), digest.as_ref(), &b64(pair.sign(digest.as_ref()))));
+    }
+
+    /// Comprueba que un instalador firmado con tools/firmar pase con la clave
+    /// que lleva Michi: `MICHI_VERIFICAR=<instalador.exe> cargo test -- --ignored verifica`.
+    #[test]
+    #[ignore]
+    fn verifica_un_instalador_firmado() {
+        let path = std::env::var("MICHI_VERIFICAR").expect("MICHI_VERIFICAR=<instalador.exe>");
+        let bytes = std::fs::read(&path).unwrap();
+        let signature = std::fs::read_to_string(format!("{path}.sig")).unwrap();
+        let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
+        assert!(signature_ok(&UPDATE_KEY, digest.as_ref(), &signature), "la firma no es de la clave de Michi");
     }
 
     /// Descarga de verdad el instalador de la ultima version publicada y lo
