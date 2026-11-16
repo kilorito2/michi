@@ -93,6 +93,9 @@ pub struct TabSecurity {
     /// Direccion http:// que espera la decision del usuario en la pagina de
     /// aviso (modo estricto, ver INSECURE_URL).
     pub insecure_target: Option<String>,
+    /// Lo que espera en la pagina de aviso es un formulario enviado por POST
+    /// (modo estricto, ver HttpPlan::WarnForm): no se envio.
+    pub insecure_form: bool,
     /// URL de la navegacion principal en curso: un error de certificado es
     /// "de la pagina" si es de su mismo origen (ver on_certificate_error).
     pub nav_target: String,
@@ -407,7 +410,7 @@ fn on_navigation_starting(state: &Shared, core: &ICoreWebView2, id: u64) {
             let mut has = BOOL(0);
             unsafe { h.Contains(&windows_core::HSTRING::from("Content-Type"), &mut has) }.is_ok() && has.as_bool()
         });
-        if https_first(&s, id, &uri, nav_id, redirected.as_bool(), may_upgrade(new_document, has_body)) {
+        if https_first(&s, id, &uri, nav_id, redirected.as_bool(), new_document, has_body) {
             unsafe { args.SetCancel(true)? };
         }
         Ok(())
@@ -416,10 +419,32 @@ fn on_navigation_starting(state: &Shared, core: &ICoreWebView2, id: u64) {
     let _ = unsafe { core.add_NavigationStarting(&handler, &mut token) };
 }
 
-/// Si una navegacion a http:// se puede desviar a HTTPS (ver https_first):
-/// nueva (no atras/adelante/recargar) y sin cuerpo (no un formulario POST).
-pub fn may_upgrade(new_document: bool, has_body: bool) -> bool {
-    new_document && !has_body
+/// Que hacer con una navegacion a http:// de un sitio que todavia no se
+/// permitio por HTTP (ver https_first).
+#[derive(Debug, PartialEq, Eq)]
+pub enum HttpPlan {
+    /// Cancelarla y probar por HTTPS.
+    Upgrade,
+    /// Un formulario POST en modo estricto: no se envia, se muestra el aviso.
+    WarnForm,
+    /// Dejarla seguir como esta.
+    Leave,
+}
+
+/// HttpPlan segun el modo de "Conexiones seguras" y la navegacion. Atras,
+/// adelante y recargar no se desvian (esa entrada ya se abrio antes). Un
+/// formulario enviado por POST (`has_body`) tampoco se desvia: el desvio
+/// cancela la navegacion y abre la direccion por HTTPS con un GET, y los
+/// datos del formulario se perdian. En modo normal sale por HTTP como lo
+/// pidio la pagina; en el estricto se avisa antes (y no se envia: WebView2 no
+/// deja volver a mandar ese POST desde nuestra pagina de aviso).
+pub fn http_plan(mode: &str, new_document: bool, has_body: bool) -> HttpPlan {
+    match (mode, new_document, has_body) {
+        ("off", _, _) | (_, false, _) => HttpPlan::Leave,
+        ("strict", true, true) => HttpPlan::WarnForm,
+        (_, true, true) => HttpPlan::Leave,
+        (_, true, false) => HttpPlan::Upgrade,
+    }
 }
 
 /// Michi va a llevar la pestana `id` a `url` (no la pagina que muestra): si
@@ -485,16 +510,22 @@ pub fn leaves_insecure_page(old: &str, new: &str) -> bool {
 /// Decide una navegacion que arranca (ver on_navigation_starting). Devuelve
 /// si hay que cancelarla.
 ///
-/// `may_upgrade`: es una navegacion nueva y sin cuerpo. Atras/adelante/recargar
-/// no se desvian (esa entrada ya se abrio antes), y un formulario enviado por
-/// POST tampoco: el desvio cancela la navegacion y abre la direccion por
-/// HTTPS con un GET, asi que los datos del formulario se perdian. Ese POST
-/// sale por HTTP como lo pidio la pagina (la barra lo marca como no seguro).
-fn https_first(state: &Shared, id: u64, uri: &str, nav_id: u64, redirected: bool, may_upgrade: bool) -> bool {
+/// `new_document` y `has_body`: ver http_plan.
+fn https_first(
+    state: &Shared,
+    id: u64,
+    uri: &str,
+    nav_id: u64,
+    redirected: bool,
+    new_document: bool,
+    has_body: bool,
+) -> bool {
     enum Step {
         Allow,
         /// Cancelar y probar por HTTPS.
         Upgrade(String, String),
+        /// Un formulario POST a HTTP en modo estricto: cancelar y avisar.
+        WarnForm(String),
         /// Nuestro intento por HTTPS redirige a HTTP: no hay HTTPS de verdad.
         RedirectedBack(Upgrade),
     }
@@ -524,11 +555,13 @@ fn https_first(state: &Shared, id: u64, uri: &str, nav_id: u64, redirected: bool
                 sec.upgrade = None;
             }
         }
-        if matches!(step, Step::Allow) && mode != "off" && may_upgrade {
-            if let Some((host, https_url)) = https_upgrade(uri) {
-                if !st.http_allowed.contains(&host) {
-                    step = Step::Upgrade(host, https_url);
-                }
+        if matches!(step, Step::Allow) {
+            if let Some((host, https_url)) = https_upgrade(uri).filter(|(host, _)| !st.http_allowed.contains(host)) {
+                step = match http_plan(&mode, new_document, has_body) {
+                    HttpPlan::Upgrade => Step::Upgrade(host, https_url),
+                    HttpPlan::WarnForm => Step::WarnForm(host),
+                    HttpPlan::Leave => Step::Allow,
+                };
             }
         }
         step
@@ -549,6 +582,14 @@ fn https_first(state: &Shared, id: u64, uri: &str, nav_id: u64, redirected: bool
             st.request(Action::LoadUrl(id, https_url));
             true
         }
+        Step::WarnForm(host) => {
+            eprintln!("[seguridad] un formulario se iba a enviar a {host} por HTTP: aviso");
+            let cancel = fall_back(st, id, true, host, uri.to_string(), true);
+            if let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) {
+                tab.sec.insecure_form = true;
+            }
+            cancel
+        }
         Step::RedirectedBack(up) => {
             eprintln!("[seguridad] {} redirige de HTTPS a HTTP", up.host);
             // La navegacion a la direccion http:// ya esta en curso (es la
@@ -566,6 +607,7 @@ fn fall_back(st: &mut AppState, id: u64, strict: bool, host: String, http_url: S
     if strict {
         if let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) {
             tab.sec.insecure_target = Some(http_url);
+            tab.sec.insecure_form = false;
         }
         st.request(Action::LoadUrl(id, INSECURE_URL.into()));
         return true;
@@ -578,22 +620,41 @@ fn fall_back(st: &mut AppState, id: u64, strict: bool, host: String, http_url: S
 }
 
 /// Pagina de aviso > "Continuar al sitio": el usuario acepta abrirlo por HTTP.
+///
+/// Si lo que esperaba era un formulario (ver HttpPlan::WarnForm), se vuelve a
+/// la pagina del formulario para enviarlo de nuevo: abrir la direccion
+/// pendiente seria un GET, sin los datos. Ya permitido el sitio, ese envio sale.
 pub fn proceed_insecure(state: &Shared, id: u64) {
-    let mut st = state.borrow_mut();
-    let target = st.tabs.iter().find(|t| t.id == id).and_then(|t| t.sec.insecure_target.clone());
-    let Some(url) = target else { return };
-    if let Some(host) = host_of(&url) {
-        st.http_allowed.insert(host);
+    let back_to_form = {
+        let mut st = state.borrow_mut();
+        let Some(tab) = st.tabs.iter().find(|t| t.id == id) else { return };
+        let (target, form) = (tab.sec.insecure_target.clone(), tab.sec.insecure_form);
+        let can_go_back = tab.webview.can_go_back().unwrap_or(false);
+        let Some(url) = target else { return };
+        if let Some(host) = host_of(&url) {
+            st.http_allowed.insert(host);
+        }
+        if form && can_go_back {
+            true
+        } else {
+            st.request(Action::LoadUrl(id, url));
+            false
+        }
+    };
+    if back_to_form {
+        if let Some(tab) = state.borrow().tabs.iter().find(|t| t.id == id) {
+            let _ = tab.webview.go_back();
+        }
     }
-    st.request(Action::LoadUrl(id, url));
 }
 
 /// Los datos de la pagina de aviso de esa pestana.
-pub fn insecure_info(state: &Shared, id: u64) -> Option<(String, String)> {
+pub fn insecure_info(state: &Shared, id: u64) -> Option<(String, String, bool)> {
     let st = state.borrow();
-    let url = st.tabs.iter().find(|t| t.id == id)?.sec.insecure_target.clone()?;
+    let sec = &st.tabs.iter().find(|t| t.id == id)?.sec;
+    let url = sec.insecure_target.clone()?;
     let host = host_of(&url).unwrap_or_default();
-    Some((url, host))
+    Some((url, host, sec.insecure_form))
 }
 
 /// La pagina de una navegacion empezo a cargar: lo bloqueado en la anterior
@@ -1303,10 +1364,17 @@ mod tests {
 
     #[test]
     fn forms_sent_by_post_are_not_redirected_to_https() {
-        assert!(may_upgrade(true, false));
-        assert!(!may_upgrade(true, true));
-        assert!(!may_upgrade(false, false));
-        assert!(!may_upgrade(false, true));
+        // Una direccion o un enlace: se prueba por HTTPS.
+        assert_eq!(http_plan("upgrade", true, false), HttpPlan::Upgrade);
+        assert_eq!(http_plan("strict", true, false), HttpPlan::Upgrade);
+        // Un formulario POST: nunca se convierte en GET; en estricto, aviso.
+        assert_eq!(http_plan("upgrade", true, true), HttpPlan::Leave);
+        assert_eq!(http_plan("strict", true, true), HttpPlan::WarnForm);
+        // Atras/adelante/recargar, o con el modo apagado: tal cual.
+        assert_eq!(http_plan("upgrade", false, false), HttpPlan::Leave);
+        assert_eq!(http_plan("strict", false, true), HttpPlan::Leave);
+        assert_eq!(http_plan("off", true, false), HttpPlan::Leave);
+        assert_eq!(http_plan("off", true, true), HttpPlan::Leave);
     }
 
     #[test]

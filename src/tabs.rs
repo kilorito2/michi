@@ -239,6 +239,7 @@ fn create_tab(
                         // ya no es "el de la pestana" (ver Tab::real_url).
                         if security::leaves_insecure_page(&tab.url, &page_url) {
                             tab.sec.insecure_target = None;
+                            tab.sec.insecure_form = false;
                         }
                         tab.url = page_url.clone();
                         tab.loading = matches!(event, PageLoadEvent::Started);

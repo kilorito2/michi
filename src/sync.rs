@@ -403,8 +403,8 @@ pub fn push_crashed(state: &Shared, tab_id: u64) {
 
 /// Sitio pendiente de la pagina de aviso de HTTPS de esa pestana.
 pub fn push_insecure(state: &Shared, tab_id: u64) {
-    let Some((url, host)) = security::insecure_info(state, tab_id) else { return };
-    let data = json!({ "url": url, "host": host });
+    let Some((url, host, form)) = security::insecure_info(state, tab_id) else { return };
+    let data = json!({ "url": url, "host": host, "form": form });
     let st = state.borrow();
     if let Some(tab) = st.tabs.iter().find(|t| t.id == tab_id && is_own_page(&t.url)) {
         let _ = tab.webview.evaluate_script(&format!("window.onInsecure && window.onInsecure({data})"));

@@ -430,6 +430,11 @@ flowchart LR
 No se tocan `localhost`, las IP, los nombres de la red local ni los puertos no
 estándar.
 
+Un **formulario** que se envía a un sitio `http://` no se pasa a HTTPS (se
+perderían sus datos): con *Usar HTTPS cuando exista* sale como lo pidió la
+página; con *Avisar antes* no se envía y aparece el aviso, desde donde puedes
+permitir el sitio y volver al formulario para enviarlo.
+
 ### Todas las medidas
 
 | | Medida | Qué hace |

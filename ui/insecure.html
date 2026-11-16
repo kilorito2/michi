@@ -89,7 +89,14 @@
     host.className = 'host';
     host.textContent = d.host;
     desc.textContent = '';
-    desc.append('Se intentó abrir ', host, ' con una conexión segura (HTTPS), pero el sitio no la ofrece.');
+    if (d.form) {
+      // Un formulario POST que iba sin cifrar: no se envio (ver security::HttpPlan).
+      desc.append('Un formulario de esta página se iba a enviar a ', host,
+        ' sin conexión segura (HTTPS), así que no se envió. Si continúas, vuelves a la página para enviarlo de nuevo.');
+      go.textContent = 'Permitir el sitio y volver al formulario';
+    } else {
+      desc.append('Se intentó abrir ', host, ' con una conexión segura (HTTPS), pero el sitio no la ofrece.');
+    }
     go.hidden = false;
     document.title = d.host + ' - Sitio no seguro';
   };
