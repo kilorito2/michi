@@ -23,7 +23,8 @@ pub fn push_tabs(state: &Shared) {
                 "title": t.title,
                 "url": t.url,
                 "active": i == st.active,
-                "favicon": t.favicon,
+                // La URL corta, no el data URL (ver protocol::favicon_url).
+                "favicon": t.favicon.as_deref().and_then(protocol::favicon_url),
                 "incognito": t.incognito,
                 "pinned": t.pinned,
                 "muted": t.muted,
@@ -290,6 +291,13 @@ fn for_own_pages(state: &Shared, js: &str) {
     }
 }
 
+/// Version de WebView2: no cambia mientras Michi esta abierto, y preguntarla
+/// carga la DLL del cargador cada vez.
+fn engine_version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| wry::webview_version().unwrap_or_default())
+}
+
 /// Ajustes + catalogos (buscadores, fondos) para la pestana nueva y la
 /// pagina de ajustes.
 pub fn push_own_pages(state: &Shared) {
@@ -313,8 +321,9 @@ pub fn push_own_pages(state: &Shared) {
             "engines": engines,
             "themes": themes,
             "permissionKinds": permission_kinds,
-            "smartscreenOffInWindows": security::smartscreen_off_in_windows(),
-            "engineVersion": wry::webview_version().unwrap_or_default(),
+            // Los dos se calculan una vez (esto corre en cada cambio de pestana).
+            "smartscreenOffInWindows": security::smartscreen_off_cached(),
+            "engineVersion": engine_version(),
             "appVersion": env!("CARGO_PKG_VERSION"),
             "dataDir": storage::data_dir(),
             "historyCount": st.history.len(),

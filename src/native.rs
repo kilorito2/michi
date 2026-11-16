@@ -126,13 +126,18 @@ pub fn add_cookies(webview: &WebView, cookies: &[Cookie]) -> usize {
     added
 }
 
+/// Tope de un favicon (ver stream_to_data_url).
+pub const FAVICON_MAX: usize = 64 * 1024;
+
 /// Convierte el IStream con los bytes PNG del favicon (lo que entrega
 /// ICoreWebView2_15::GetFavicon) en un data URL listo para un <img>. None si el
-/// icono esta vacio o no se pudo leer. Con un tope por si el stream fuera enorme.
+/// icono esta vacio, no se pudo leer o pasa el tope: un logo de 16-32 px en
+/// PNG pesa unos pocos KB, y uno enorme (un sitio que declara una foto como
+/// icono) viajaba a cada pagina de la interfaz y quedaba en favicons.json.
 pub fn stream_to_data_url(stream: windows::Win32::System::Com::IStream) -> Option<String> {
     use base64::Engine;
 
-    const MAX: usize = 512 * 1024;
+    const MAX: usize = FAVICON_MAX;
     let mut bytes = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
@@ -142,7 +147,11 @@ pub fn stream_to_data_url(stream: windows::Win32::System::Com::IStream) -> Optio
             break; // fin del stream
         }
         bytes.extend_from_slice(&buf[..read as usize]);
-        if bytes.len() > MAX || hr.is_err() {
+        if bytes.len() > MAX {
+            // Antes se cortaba ahi y quedaba un PNG roto: ahora no hay icono.
+            return None;
+        }
+        if hr.is_err() {
             break;
         }
     }

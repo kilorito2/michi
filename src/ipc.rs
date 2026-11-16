@@ -401,6 +401,9 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
     let Ok(cmd) = serde_json::from_str::<Command>(raw) else { return };
     match (page, cmd) {
         (_, Command::Ready) => {
+            if page == "/settings" {
+                security::refresh_smartscreen_status();
+            }
             sync::push_perf(state);
             sync::push_wallpaper(state);
             sync::push_own_pages(state);

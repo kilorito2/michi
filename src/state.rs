@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -447,6 +447,8 @@ pub struct AppState {
     pub assistant_asking: bool,
     /// Hasta cuando la barra muestra que May esta usando Michi (ver control.rs).
     pub assistant_until: Option<Instant>,
+    /// Lo que hay que escribir en el disco (ver AppState::flush_saves).
+    saves: PendingSaves,
 
     next_id: u64,
 }
@@ -503,6 +505,7 @@ impl AppState {
             passwords: crate::passwords::Passwords::load(),
             assistant_asking: false,
             assistant_until: None,
+            saves: PendingSaves::default(),
 
             next_id: 1,
         }
@@ -591,11 +594,56 @@ impl AppState {
     /// Con "borrar datos al cerrar" el historial vive solo en memoria: si se
     /// escribiera y el proceso se cayera, quedaria en el disco (como los
     /// logos en suggest::remember_favicon y el zoom en zoom::remember).
+    ///
+    /// No escribe en el momento: queda anotado y sale con flush_saves (cada
+    /// pagina que carga lo pide, y antes se reescribia el archivo entero en el
+    /// hilo de la interfaz cada vez).
     pub fn save_history(&self) {
         if self.settings.clear_on_exit {
             return;
         }
-        storage::save(storage::HISTORY_FILE, &self.history);
+        self.mark(&self.saves.history);
+    }
+
+    /// Los logos de los sitios cambiaron (ver suggest::remember_favicon).
+    pub fn save_favicons(&self) {
+        if self.settings.clear_on_exit {
+            return;
+        }
+        self.mark(&self.saves.favicons);
+    }
+
+    fn mark(&self, flag: &Cell<bool>) {
+        flag.set(true);
+        if self.saves.since.get().is_none() {
+            self.saves.since.set(Some(Instant::now()));
+            // Para que el bucle de eventos se entere del plazo (ver saves_due).
+            self.wake();
+        }
+    }
+
+    /// Cuando hay que escribir lo pendiente (None = nada pendiente).
+    pub fn saves_due(&self) -> Option<Instant> {
+        save_deadline(self.saves.since.get())
+    }
+
+    /// Escribe ya lo pendiente (en el hilo escritor, ver
+    /// storage::save_in_background). Lo llaman el bucle de eventos cuando vence
+    /// el plazo y el cierre de Michi (que despues espera a que termine).
+    pub fn flush_saves(&self) {
+        let s = &self.saves;
+        s.since.set(None);
+        // "Borrar datos al cerrar" se mira ahora: pudo activarse despues de anotarlo.
+        let keep = !self.settings.clear_on_exit;
+        if s.history.replace(false) && keep {
+            storage::save_in_background(storage::HISTORY_FILE, &self.history);
+        }
+        if s.favicons.replace(false) && keep {
+            storage::save_in_background(storage::FAVICONS_FILE, &self.suggest.favicons);
+        }
+        if s.session.replace(false) && keep {
+            storage::save_in_background(storage::SESSION_FILE, &self.session());
+        }
     }
 
     pub fn save_folders(&self) {
@@ -605,11 +653,17 @@ impl AppState {
 
     /// Guarda las pestanas abiertas (para "al iniciar: restaurar"). Nunca con
     /// "borrar datos al cerrar": la sesion es justamente lo que no tiene que
-    /// quedar en el disco. Las de incognito tampoco: no se restauran.
+    /// quedar en el disco. Las de incognito tampoco: no se restauran. Como el
+    /// historial, sale con flush_saves.
     pub fn save_session(&self) {
         if self.settings.clear_on_exit {
             return;
         }
+        self.mark(&self.saves.session);
+    }
+
+    /// Las pestanas abiertas, como se guardan (ver save_session).
+    fn session(&self) -> storage::Session {
         let normal = || self.tabs.iter().filter(|t| !t.incognito);
         let urls: Vec<String> = normal().map(|t| t.real_url().to_string()).collect();
         // Cuantas pestanas normales hay antes de la activa (si la activa es de
@@ -631,14 +685,13 @@ impl AppState {
                 Some(i)
             })
             .collect();
-        let session = storage::Session {
+        storage::Session {
             active: before.min(urls.len().saturating_sub(1)),
             urls,
             pinned,
             groups,
             tab_groups,
-        };
-        storage::save(storage::SESSION_FILE, &session);
+        }
     }
 
     pub fn alloc_id(&mut self) -> u64 {
@@ -649,6 +702,26 @@ impl AppState {
 }
 
 pub type Shared = Rc<RefCell<AppState>>;
+
+/// Cada cuanto, como mucho, se escriben el historial, la sesion y los logos.
+pub const SAVE_EVERY: Duration = Duration::from_secs(5);
+
+/// Que hay pendiente de escribir y desde cuando (ver AppState::flush_saves).
+/// Con Cell: se anota desde metodos que solo tienen `&self`.
+#[derive(Default)]
+struct PendingSaves {
+    history: Cell<bool>,
+    session: Cell<bool>,
+    favicons: Cell<bool>,
+    since: Cell<Option<Instant>>,
+}
+
+/// El plazo para escribir lo pendiente desde `since` (la primera vez que se
+/// anoto algo desde la ultima escritura): asi una racha de cambios sale en
+/// una sola escritura, a mas tardar SAVE_EVERY despues del primero.
+fn save_deadline(since: Option<Instant>) -> Option<Instant> {
+    since.map(|t| t + SAVE_EVERY)
+}
 
 #[cfg(test)]
 mod tests {
@@ -677,11 +750,39 @@ mod tests {
         st.settings.clear_on_exit = true;
         st.history.push(storage::HistoryEntry { title: "a".into(), url: "https://a.com/".into(), time: 1 });
         st.save_history();
+        st.flush_saves();
+        assert!(storage::wait_writes(storage::WRITE_WAIT));
         assert!(!file.exists());
         assert_eq!(st.history.len(), 1);
 
         st.settings.clear_on_exit = false;
         st.save_history();
+        st.flush_saves();
+        assert!(storage::wait_writes(storage::WRITE_WAIT));
         assert!(file.exists());
+    }
+
+    #[test]
+    fn saves_are_batched_and_written_at_most_every_few_seconds() {
+        let dir = storage::test_dir::TempDataDir::new("diferido");
+        let st = AppState::new();
+        assert_eq!(st.saves_due(), None);
+        st.save_history();
+        let due = st.saves_due().unwrap();
+        // Mas cambios no corren el plazo: sale a lo sumo SAVE_EVERY despues del primero.
+        st.save_session();
+        st.save_history();
+        assert_eq!(st.saves_due(), Some(due));
+        assert!(due <= Instant::now() + SAVE_EVERY);
+        // Nada se escribe hasta el plazo.
+        assert!(storage::wait_writes(storage::WRITE_WAIT));
+        assert!(!dir.path.join(storage::HISTORY_FILE).exists());
+        st.flush_saves();
+        assert_eq!(st.saves_due(), None);
+        assert!(storage::wait_writes(storage::WRITE_WAIT));
+        assert!(dir.path.join(storage::HISTORY_FILE).exists());
+        assert!(dir.path.join(storage::SESSION_FILE).exists());
+        assert!(!dir.path.join(storage::FAVICONS_FILE).exists());
+        assert_eq!(save_deadline(None), None);
     }
 }

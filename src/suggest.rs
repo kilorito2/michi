@@ -108,9 +108,11 @@ pub struct Favicons {
 }
 
 impl Favicons {
+    /// La URL corta (app://) del logo del sitio de `url`, para las paginas
+    /// (ver protocol::favicon_url).
     pub fn get(&self, url: &str) -> Option<String> {
         let (_, host) = split_url(url)?;
-        self.icons.get(bare(&host)).map(|(_, icon)| icon.clone())
+        self.icons.get(bare(&host)).and_then(|(_, icon)| crate::protocol::favicon_url(icon))
     }
 
     /// Devuelve si cambio algo (para guardar solo entonces).
@@ -744,9 +746,9 @@ pub fn remember_favicon(state: &Shared, url: &str, icon: &Option<String>) {
     let Some((_, host)) = split_url(url) else { return };
     let mut st = state.borrow_mut();
     let changed = st.suggest.favicons.put(bare(&host).to_string(), icon.clone());
-    // Con "borrar datos al cerrar" no queda en el disco.
-    if changed && !st.settings.clear_on_exit {
-        storage::save(storage::FAVICONS_FILE, &st.suggest.favicons);
+    // Con "borrar datos al cerrar" no queda en el disco (ver save_favicons).
+    if changed {
+        st.save_favicons();
     }
 }
 
@@ -900,6 +902,9 @@ mod tests {
         assert_eq!(f.icons.len(), MAX_FAVICONS);
         // Se fueron los mas viejos; quedan los ultimos.
         assert!(f.get("https://a.com/").is_none());
-        assert_eq!(f.get("https://www.s405.com/x").as_deref(), Some("z"));
+        assert_eq!(f.icons.get("s405.com").map(|(_, icon)| icon.as_str()), Some("z"));
+        // A las paginas les llega la URL corta del logo, no el data URL.
+        f.put("png.com".into(), "data:image/png;base64,AAAA".into());
+        assert!(f.get("https://www.png.com/x").is_some_and(|u| u.starts_with("/favicon/")));
     }
 }

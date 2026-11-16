@@ -206,7 +206,13 @@ fn relaunch(state: &Shared) {
         return;
     }
     eprintln!("[recuperacion] se cayo el proceso principal de WebView2");
-    state.borrow().save_session();
+    {
+        let st = state.borrow();
+        st.save_session();
+        st.flush_saves();
+    }
+    // El Michi nuevo lee la sesion apenas arranca.
+    crate::storage::wait_writes(crate::storage::WRITE_WAIT);
     if let Some(w) = state.borrow().window.clone() {
         w.set_visible(false);
     }

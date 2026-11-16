@@ -233,6 +233,17 @@ impl ApplicationHandler<UserEvent> for App {
         let update = update::tick(&self.state);
         let notice = notice::tick(&self.state);
         let assistant = control::tick(&self.state);
+        // Historial, sesion y logos: se escriben juntos cuando vence el plazo.
+        let saves = {
+            let st = self.state.borrow();
+            match st.saves_due() {
+                Some(due) if std::time::Instant::now() >= due => {
+                    st.flush_saves();
+                    None
+                }
+                due => due,
+            }
+        };
         match panels
             .into_iter()
             .chain(menu)
@@ -243,6 +254,7 @@ impl ApplicationHandler<UserEvent> for App {
             .chain(update)
             .chain(notice)
             .chain(assistant)
+            .chain(saves)
             .min()
         {
             Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),

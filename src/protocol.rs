@@ -30,8 +30,9 @@
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use ring::rand::{SecureRandom, SystemRandom};
 use wry::http::header::{
@@ -129,6 +130,25 @@ pub fn handle(request: Request<Vec<u8>>, responder: RequestAsyncResponder) {
         return responder.respond(respond_full(include_bytes!("../assets/icon/michi-256.png"), "image/png"));
     }
 
+    // Logo de un sitio (pestanas, historial, marcadores, sugerencias,
+    // contrasenas): solo con la clave de esta sesion (ver favicon_url).
+    if let Some(rest) = path.strip_prefix("/favicon/") {
+        let icon = rest
+            .strip_prefix(icon_token())
+            .and_then(|r| r.strip_prefix('/'))
+            .and_then(|key| favicons().lock().ok()?.get(key).cloned());
+        return responder.respond(match icon {
+            Some(bytes) => base()
+                .header(CONTENT_TYPE, "image/png")
+                .header(CONTENT_LENGTH, bytes.len())
+                // Cambia la clave si cambia el icono: se puede guardar.
+                .header(CACHE_CONTROL, "private, max-age=86400")
+                .body(Cow::Owned(bytes.to_vec()))
+                .unwrap(),
+            None => not_found(),
+        });
+    }
+
     // Icono de una extension instalada (pagina de extensiones, barra). Solo
     // con la clave de esta sesion (ver icon_url), solo ids del registro, y
     // solo el archivo que declara su manifest (ver extensions::icon_file).
@@ -181,6 +201,44 @@ fn wallpaper_file(requested: &str) -> Option<(PathBuf, &'static str)> {
         let theme = requested.strip_suffix(suffix)?;
         is_theme(theme).then(|| (wallpapers_dir().join(requested), mime))
     })
+}
+
+/// Logos de sitios ya registrados con favicon_url: clave -> bytes PNG.
+fn favicons() -> &'static Mutex<HashMap<String, Arc<Vec<u8>>>> {
+    static ICONS: OnceLock<Mutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
+    ICONS.get_or_init(Default::default)
+}
+
+/// Tope de logos distintos en memoria en una sesion (cada uno pesa pocos KB).
+const MAX_FAVICONS: usize = 4000;
+
+/// URL (relativa a app://) de un logo de sitio, que Michi guarda como data URL
+/// PNG (ver native::stream_to_data_url). Las paginas reciben esta URL corta y
+/// no el data URL: antes cada push_tabs, push_history y push_bookmarks
+/// mandaba los logos enteros (hasta 150 en el historial), en el hilo de la
+/// interfaz, cada vez que cambiaba cualquier cosa. La clave es la huella del
+/// icono (si cambia, cambia la URL) y lleva la clave de la sesion, como los
+/// iconos de extensiones: un sitio no puede probar URLs para saber que
+/// sitios se visitaron.
+pub fn favicon_url(data_url: &str) -> Option<String> {
+    let key = favicon_key(data_url);
+    let mut icons = favicons().lock().ok()?;
+    if !icons.contains_key(&key) {
+        use base64::Engine;
+        let b64 = data_url.strip_prefix("data:image/png;base64,")?;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+        if icons.len() >= MAX_FAVICONS {
+            icons.clear();
+        }
+        icons.insert(key.clone(), Arc::new(bytes));
+    }
+    Some(format!("/favicon/{}/{key}", icon_token()))
+}
+
+/// Huella corta (SHA-256, 16 hex) de un logo.
+fn favicon_key(data_url: &str) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, data_url.as_bytes());
+    digest.as_ref()[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// URL (relativa a app://) del icono de una extension, con la clave de esta
@@ -366,6 +424,22 @@ mod tests {
             respond_page(include_bytes!("../ui/menu.html")).headers()[CONTENT_SECURITY_POLICY],
             respond_page(include_bytes!("../ui/menu.html")).headers()[CONTENT_SECURITY_POLICY]
         );
+    }
+
+    #[test]
+    fn site_logos_are_served_by_a_short_url_with_the_session_key() {
+        let a = "data:image/png;base64,iVBORw0KGgo=";
+        let url = favicon_url(a).unwrap();
+        assert!(url.starts_with(&format!("/favicon/{}/", icon_token())));
+        assert_eq!(url.len(), "/favicon/".len() + 32 + 1 + 16);
+        // El mismo icono, la misma URL; otro icono, otra.
+        assert_eq!(favicon_url(a), Some(url.clone()));
+        assert_ne!(favicon_url("data:image/png;base64,AAAA"), Some(url.clone()));
+        // Los bytes quedan para servirlos.
+        let key = url.rsplit('/').next().unwrap();
+        assert_eq!(favicons().lock().unwrap().get(key).map(|b| b.len()), Some(8));
+        // Lo que no es un PNG en base64 no se sirve.
+        assert_eq!(favicon_url("data:text/html,<h1>x</h1>"), None);
     }
 
     #[test]

@@ -98,8 +98,80 @@ pub fn save<T: Serialize>(name: &str, value: &T) {
     }
 }
 
+/// Borra un archivo de datos. Pasa por el hilo escritor (y lo espera): si no,
+/// una escritura en segundo plano todavia pendiente de ese mismo archivo (ver
+/// save_in_background) lo podia volver a crear despues de borrado (el
+/// historial justo despues de activar "borrar datos al cerrar").
 pub fn remove(name: &str) {
-    let _ = std::fs::remove_file(data_dir().join(name));
+    send(Job::Remove(data_dir().join(name)));
+    wait_writes(WRITE_WAIT);
+}
+
+// ---------------------------------------------------------------------------
+// Escritura en segundo plano
+// ---------------------------------------------------------------------------
+
+/// Lo que hace el hilo escritor, en el orden en que se pidio.
+enum Job {
+    Write(PathBuf, Vec<u8>),
+    Remove(PathBuf),
+    /// Avisa cuando termino todo lo anterior (ver wait_writes).
+    Barrier(std::sync::mpsc::Sender<()>),
+}
+
+/// Cuanto se espera, como mucho, a que el hilo escritor termine lo pendiente.
+pub const WRITE_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+fn send(job: Job) {
+    use std::sync::{mpsc, Mutex, OnceLock};
+    static WRITER: OnceLock<Mutex<mpsc::Sender<Job>>> = OnceLock::new();
+    let tx = WRITER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<Job>();
+        std::thread::spawn(move || {
+            for job in rx {
+                match job {
+                    Job::Write(path, bytes) => {
+                        let result = path
+                            .parent()
+                            .map_or(Ok(()), std::fs::create_dir_all)
+                            .and_then(|_| write_atomic(&path, &bytes));
+                        if let Err(err) = result {
+                            eprintln!("[storage] no se pudo guardar {}: {err}", path.display());
+                        }
+                    }
+                    Job::Remove(path) => {
+                        let _ = std::fs::remove_file(path);
+                    }
+                    Job::Barrier(done) => {
+                        let _ = done.send(());
+                    }
+                }
+            }
+        });
+        Mutex::new(tx)
+    });
+    if let Ok(tx) = tx.lock() {
+        let _ = tx.send(job);
+    }
+}
+
+/// Como `save`, pero el archivo se escribe en el hilo escritor: lo que se
+/// guarda seguido y puede pesar (historial, sesion, logos) no frena el hilo
+/// de la interfaz. Se serializa aca (es una foto del valor de este momento)
+/// y las escrituras salen en orden.
+pub fn save_in_background<T: Serialize>(name: &str, value: &T) {
+    match serde_json::to_vec_pretty(value) {
+        Ok(bytes) => send(Job::Write(data_dir().join(name), bytes)),
+        Err(err) => eprintln!("[storage] no se pudo guardar {name}: {err}"),
+    }
+}
+
+/// Espera a que el hilo escritor termine lo pendiente (al cerrar Michi).
+/// Devuelve si termino a tiempo.
+pub fn wait_writes(timeout: std::time::Duration) -> bool {
+    let (tx, rx) = std::sync::mpsc::channel();
+    send(Job::Barrier(tx));
+    rx.recv_timeout(timeout).is_ok()
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -435,6 +507,21 @@ mod tests {
         let missing: Vec<Bookmark> = load("no-existe.json");
         assert!(missing.is_empty());
         assert_eq!(quarantine_name("a.json", 7), "a.json.corrupto-7");
+    }
+
+    #[test]
+    fn background_writes_land_in_order_and_removes_wait_for_them() {
+        let dir = test_dir::TempDataDir::new("fondo");
+        for i in 0..20u32 {
+            save_in_background(HISTORY_FILE, &vec![i]);
+        }
+        assert!(wait_writes(WRITE_WAIT));
+        let last: Vec<u32> = load(HISTORY_FILE);
+        assert_eq!(last, vec![19]);
+        // Un borrado despues de una escritura pendiente gana siempre.
+        save_in_background(HISTORY_FILE, &vec![1u32]);
+        remove(HISTORY_FILE);
+        assert!(!dir.path.join(HISTORY_FILE).exists());
     }
 
     #[test]

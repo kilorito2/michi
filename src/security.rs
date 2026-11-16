@@ -256,6 +256,28 @@ pub fn smartscreen_off_in_windows() -> bool {
     false
 }
 
+/// smartscreen_off_in_windows ya leido: 0 = no, 1 = si, 2 = sin leer.
+static SMARTSCREEN_OFF: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+
+/// Lo ultimo que se leyo del registro (ver refresh_smartscreen_status): las
+/// paginas propias lo reciben en cada cambio de pestana, y leer el registro
+/// cada vez no hace falta.
+pub fn smartscreen_off_cached() -> bool {
+    match SMARTSCREEN_OFF.load(std::sync::atomic::Ordering::Relaxed) {
+        2 => refresh_smartscreen_status(),
+        v => v == 1,
+    }
+}
+
+/// Vuelve a leer del registro si Windows apago SmartScreen. Al abrir
+/// Ajustes, que es donde se muestra (el usuario pudo cambiarlo en Seguridad
+/// de Windows mientras tanto).
+pub fn refresh_smartscreen_status() -> bool {
+    let off = smartscreen_off_in_windows();
+    SMARTSCREEN_OFF.store(off as u8, std::sync::atomic::Ordering::Relaxed);
+    off
+}
+
 /// Ajustes > SmartScreen: lo aplica a todos los WebView abiertos.
 pub fn apply_smartscreen(state: &Shared) {
     let st = state.borrow();
@@ -894,6 +916,8 @@ pub fn shutdown(state: &Shared) {
         }
         st.shutting_down = true;
         st.save_session();
+        // Lo pendiente sale ya (y se espera mas abajo, antes de soltar nada).
+        st.flush_saves();
         crate::control::forget_discovery();
         st.quit_deadline = Some(Instant::now() + SHUTDOWN_TIMEOUT);
         st.exit_env = st.topbar.as_ref().and_then(|tb| unsafe {
@@ -918,6 +942,9 @@ pub fn shutdown(state: &Shared) {
     if let Some(window) = window {
         window.set_visible(false);
     }
+    // El proceso puede terminar en cualquier momento despues de esto (ver
+    // BrowserProcessExited arriba): el historial y la sesion ya en el disco.
+    storage::wait_writes(storage::WRITE_WAIT);
     drop(views);
     state.borrow().wake();
 }
