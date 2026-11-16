@@ -399,8 +399,11 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
     }
 
     let Ok(cmd) = serde_json::from_str::<Command>(raw) else { return };
-    match (page, cmd) {
-        (_, Command::Ready) => {
+    if !allowed(page, &cmd) {
+        return;
+    }
+    match cmd {
+        Command::Ready => {
             if page == "/settings" {
                 security::refresh_smartscreen_status();
             }
@@ -420,12 +423,38 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
                 _ => {}
             }
         }
-        ("/crashed", Command::CrashedReload) => crate::recovery::reload_crashed(state, tab_id),
-        ("/", cmd @ (Command::SetTheme { .. } | Command::Search { .. })) => handle_page_command(state, cmd),
-        ("/settings", Command::NewIncognitoTab) => state.borrow_mut().request_tab_in(HOME_URL, true),
-        (
+        Command::CrashedReload => crate::recovery::reload_crashed(state, tab_id),
+        Command::NewIncognitoTab => state.borrow_mut().request_tab_in(HOME_URL, true),
+        Command::InsecureProceed => security::proceed_insecure(state, tab_id),
+        Command::InsecureBack => {
+            let st = state.borrow();
+            if let Some(tab) = st.tabs.iter().find(|t| t.id == tab_id) {
+                let _ = if tab.webview.can_go_back().unwrap_or(false) {
+                    tab.webview.go_back()
+                } else {
+                    tab.webview.load_url(HOME_LOAD_URL)
+                };
+            }
+        }
+        other => handle_page_command(state, other),
+    }
+}
+
+/// La frontera de lo que puede pedir una pagina propia abierta en una pestana
+/// (`page`: su ruta, ver dispatch_from_content). Cada una, solo lo que
+/// necesita: la pestana nueva, el fondo y buscar; ajustes, lo suyo; los
+/// avisos, sus dos botones. Nunca los comandos de ventana, pestanas, menu o
+/// paneles de ipc::dispatch, y nada desde una ruta que no sea una de estas
+/// cuatro (la barra o un panel cargados en una pestana, por ejemplo).
+fn allowed(page: &str, cmd: &Command) -> bool {
+    matches!(
+        (page, cmd),
+        ("/" | "/settings" | "/insecure" | "/crashed", Command::Ready)
+            | ("/", Command::SetTheme { .. } | Command::Search { .. })
+            | (
             "/settings",
-            cmd @ (Command::SetTheme { .. }
+            Command::NewIncognitoTab
+            | Command::SetTheme { .. }
             | Command::SetSetting { .. }
             | Command::ResetSettings
             | Command::PickDownloadsDir
@@ -449,21 +478,11 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
             | Command::PasswordEdit { .. }
             | Command::PasswordAdd { .. }
             | Command::PasswordDelete { .. }
-            | Command::PasswordForgetNever { .. }),
-        ) => handle_page_command(state, cmd),
-        ("/insecure", Command::InsecureProceed) => security::proceed_insecure(state, tab_id),
-        ("/insecure", Command::InsecureBack) => {
-            let st = state.borrow();
-            if let Some(tab) = st.tabs.iter().find(|t| t.id == tab_id) {
-                let _ = if tab.webview.can_go_back().unwrap_or(false) {
-                    tab.webview.go_back()
-                } else {
-                    tab.webview.load_url(HOME_LOAD_URL)
-                };
-            }
-        }
-        _ => {}
-    }
+            | Command::PasswordForgetNever { .. },
+        )
+            | ("/insecure", Command::InsecureProceed | Command::InsecureBack)
+            | ("/crashed", Command::CrashedReload)
+    )
 }
 
 fn handle_page_command(state: &Shared, cmd: Command) {
@@ -704,5 +723,111 @@ fn with_active(state: &Shared, f: impl FnOnce(&wry::WebView)) {
     let st = state.borrow();
     if let Some(tab) = st.tabs.get(st.active) {
         f(&tab.webview);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Los comandos de ipc::dispatch que ninguna pestana puede pedir.
+    fn interface_only() -> Vec<Command> {
+        vec![
+            Command::Navigate { url: "https://a.com/".into() },
+            Command::NavigateInput { input: "a".into() },
+            Command::Back,
+            Command::Reload,
+            Command::NewTab,
+            Command::CloseTab { id: 1 },
+            Command::SwitchTab { id: 1 },
+            Command::MoveTab { id: 1, before: None, group: None },
+            Command::DuplicateTab { id: 1 },
+            Command::CloseOtherTabs { id: 1 },
+            Command::NewGroup { id: 1 },
+            Command::CloseGroup { group: 1 },
+            Command::PasswordAnswer { choice: "save".into() },
+            Command::PasswordMenu,
+            Command::DragWindow,
+            Command::Minimize,
+            Command::ToggleMaximize,
+            Command::Close,
+            Command::ExpandLeft { value: true },
+            Command::OpenDownloadsFolder,
+            Command::ShowDownload { id: 1 },
+            Command::DownloadControl { id: 1, action: "keep".into() },
+            Command::ClearHistory,
+            Command::RemoveHistory { url: "https://a.com/".into() },
+            Command::ToggleBookmark,
+            Command::UpdateBookmark { url: "a".into(), title: "a".into(), new_url: "a".into(), folder: "".into() },
+            Command::Menu { action: "quit".into() },
+            Command::ToggleMenu,
+            Command::InstallFromStore,
+            Command::ExtPopup { id: "a".into(), right: 0.0 },
+            Command::OpenBlockedPopup,
+            Command::SuggestEnter { input: "a".into() },
+        ]
+    }
+
+    fn settings_cmd() -> Command {
+        Command::ClearData { history: true, cookies: true, cache: true, downloads: true, passwords: true, autofill: true }
+    }
+
+    #[test]
+    fn the_new_tab_page_can_only_change_the_wallpaper_and_search() {
+        assert!(allowed("/", &Command::Ready));
+        assert!(allowed("/", &Command::SetTheme { id: "x".into() }));
+        assert!(allowed("/", &Command::Search { q: "x".into() }));
+        assert!(!allowed("/", &settings_cmd()));
+        assert!(!allowed("/", &Command::SetSetting { key: "clearOnExit".into(), value: Value::Bool(true) }));
+        assert!(!allowed("/", &Command::PasswordReveal { id: 1 }));
+        assert!(!allowed("/", &Command::ExtRemove { id: "a".into() }));
+        assert!(!allowed("/", &Command::NewIncognitoTab));
+        assert!(!allowed("/", &Command::InsecureProceed));
+    }
+
+    #[test]
+    fn settings_get_their_commands_but_not_the_interface_ones() {
+        for cmd in [
+            settings_cmd(),
+            Command::SetSetting { key: "theme".into(), value: Value::Null },
+            Command::PasswordReveal { id: 1 },
+            Command::ExtRemove { id: "a".into() },
+            Command::ImportScan,
+            Command::UpdateInstall,
+            Command::NewIncognitoTab,
+        ] {
+            assert!(allowed("/settings", &cmd), "{cmd:?}");
+        }
+        assert!(!allowed("/settings", &Command::InsecureProceed));
+        assert!(!allowed("/settings", &Command::CrashedReload));
+    }
+
+    #[test]
+    fn warnings_only_get_their_buttons() {
+        assert!(allowed("/insecure", &Command::InsecureProceed));
+        assert!(allowed("/insecure", &Command::InsecureBack));
+        assert!(allowed("/crashed", &Command::CrashedReload));
+        for page in ["/insecure", "/crashed"] {
+            assert!(allowed(page, &Command::Ready));
+            assert!(!allowed(page, &settings_cmd()));
+            assert!(!allowed(page, &Command::SetTheme { id: "x".into() }));
+            assert!(!allowed(page, &Command::Search { q: "x".into() }));
+        }
+        assert!(!allowed("/crashed", &Command::InsecureProceed));
+        assert!(!allowed("/insecure", &Command::CrashedReload));
+    }
+
+    #[test]
+    fn no_tab_page_gets_window_tab_or_menu_commands() {
+        for page in ["/", "/settings", "/insecure", "/crashed", "/topbar", "/menu", "/sidebar-left", ""] {
+            for cmd in interface_only() {
+                assert!(!allowed(page, &cmd), "{page} {cmd:?}");
+            }
+        }
+        // La barra o un panel cargados en una pestana: nada, ni Ready.
+        for page in ["/topbar", "/menu", "/sidebar-right", "/suggest", "/notice", "/otra"] {
+            assert!(!allowed(page, &Command::Ready), "{page}");
+            assert!(!allowed(page, &settings_cmd()), "{page}");
+        }
     }
 }
