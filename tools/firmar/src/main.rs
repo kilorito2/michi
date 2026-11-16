@@ -1,7 +1,7 @@
 //! Firma de los instaladores de Michi (las actualizaciones, ver
 //! src/update.rs del navegador).
 //!
-//! Michi solo abre un instalador descargado si viene con su `.sig` y la firma
+//! Michi solo abre un instalador descargado si viene con su `.v2.sig` y la firma
 //! corresponde a la clave publica que lleva adentro (UPDATE_KEY). La huella
 //! que publica GitHub sola no alcanza: viene del mismo lugar que el archivo,
 //! asi que quien se quede con la cuenta o el repositorio podia publicar un
@@ -10,10 +10,17 @@
 //!
 //! Uso:
 //!   michi-firmar clave <clave.pk8>             crea el par de claves (una sola vez)
-//!   michi-firmar firmar <instalador.exe> <clave.pk8>   deja <instalador.exe>.sig
+//!   michi-firmar firmar <instalador.exe> <clave.pk8> <version>
+//!       deja <instalador.exe>.v2.sig y <instalador.exe>.sig
 //!
-//! Lo firmado es "Michi-actualizacion-v1\0" + el SHA-256 del instalador
-//! (Ed25519), y el .sig es esa firma en base64.
+//! Las dos firmas son Ed25519 en base64:
+//! - `.v2.sig`: "Michi-actualizacion-v2\0" + la version ("0.1.10") + "\0" + el
+//!   SHA-256 del instalador. Es la que exige Michi desde 0.1.10: con la version
+//!   adentro, un instalador viejo no se puede volver a publicar como nuevo.
+//! - `.sig` (v1): "Michi-actualizacion-v1\0" + el SHA-256. Solo la entienden
+//!   Michi 0.1.9 y anteriores: se sigue publicando para que puedan actualizar
+//!   (y, ya actualizados, pasan a exigir la v2). Se puede dejar de generar
+//!   cuando nadie use esas versiones.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -25,14 +32,16 @@ use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 
 /// Lo mismo que SIGNATURE_CONTEXT en src/update.rs.
-const CONTEXT: &[u8] = b"Michi-actualizacion-v1\0";
+const CONTEXT: &[u8] = b"Michi-actualizacion-v2\0";
+/// La firma que verifican Michi 0.1.9 y anteriores.
+const CONTEXT_V1: &[u8] = b"Michi-actualizacion-v1\0";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["clave", key] => new_key(Path::new(key)),
-        ["firmar", file, key] => sign(Path::new(file), Path::new(key)),
-        _ => Err("uso: michi-firmar clave <clave.pk8> | firmar <instalador.exe> <clave.pk8>".into()),
+        ["firmar", file, key, version] => sign(Path::new(file), Path::new(key), version),
+        _ => Err("uso: michi-firmar clave <clave.pk8> | firmar <instalador.exe> <clave.pk8> <version>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -60,17 +69,32 @@ fn new_key(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn sign(file: &Path, key: &Path) -> Result<(), String> {
+fn sign(file: &Path, key: &Path, version: &str) -> Result<(), String> {
+    if !is_version(version) {
+        return Err(format!("version invalida: {version} (tiene que ser como 0.1.10, sin la v)"));
+    }
     let pkcs8 = std::fs::read(key).map_err(|e| format!("no se pudo leer la clave {}: {e}", key.display()))?;
     let pair = Ed25519KeyPair::from_pkcs8(&pkcs8).map_err(|_| "la clave no es valida")?;
     let digest = sha256(file)?;
-    let message = [CONTEXT, digest.as_slice()].concat();
-    let signature = base64::engine::general_purpose::STANDARD.encode(pair.sign(&message).as_ref());
-    let mut out = PathBuf::from(file).into_os_string();
-    out.push(".sig");
-    std::fs::write(&out, format!("{signature}\n")).map_err(|e| e.to_string())?;
-    println!("Firmado: {}", Path::new(&out).display());
+    for (suffix, message) in [(".v2.sig", message_v2(version, &digest)), (".sig", [CONTEXT_V1, digest.as_slice()].concat())] {
+        let signature = base64::engine::general_purpose::STANDARD.encode(pair.sign(&message).as_ref());
+        let mut out = PathBuf::from(file).into_os_string();
+        out.push(suffix);
+        std::fs::write(&out, format!("{signature}\n")).map_err(|e| e.to_string())?;
+        println!("Firmado: {}", Path::new(&out).display());
+    }
     Ok(())
+}
+
+/// Lo mismo que signed_message en src/update.rs.
+fn message_v2(version: &str, digest: &[u8]) -> Vec<u8> {
+    [CONTEXT, version.as_bytes(), b"\0", digest].concat()
+}
+
+/// "0.1.10": numeros separados por puntos (la etiqueta de GitHub sin la "v",
+/// que es lo que compara Michi).
+fn is_version(v: &str) -> bool {
+    !v.is_empty() && v.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn sha256(file: &Path) -> Result<Vec<u8>, String> {
@@ -85,4 +109,23 @@ fn sha256(file: &Path) -> Result<Vec<u8>, String> {
         ctx.update(&buf[..n]);
     }
     Ok(ctx.finish().as_ref().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versions_are_plain_numbers() {
+        assert!(is_version("0.1.10"));
+        assert!(!is_version("v0.1.10"));
+        assert!(!is_version("0.1."));
+        assert!(!is_version(""));
+    }
+
+    #[test]
+    fn the_v2_message_carries_the_version() {
+        let m = message_v2("0.1.10", &[1, 2]);
+        assert_eq!(m, b"Michi-actualizacion-v2\x000.1.10\x00\x01\x02".to_vec());
+    }
 }

@@ -9,16 +9,26 @@
 //!   ofrece "Descargar e instalar". Nada se descarga ni se instala solo.
 //! - El instalador se descarga por HTTPS desde GitHub y se compara con el
 //!   tamano y la huella SHA-256 que publica GitHub para ese archivo.
-//! - Y tiene que venir firmado (su `.sig` en la misma version) con la clave
+//! - Y tiene que venir firmado (su `.v2.sig` en la misma version) con la clave
 //!   de quien publica Michi, cuya parte publica va adentro de este programa
 //!   (UPDATE_KEY; ver tools/firmar). La huella sola no alcanza: viene del
 //!   mismo lugar que el archivo, y quien se quedara con la cuenta o el
 //!   repositorio podia publicar un instalador cualquiera con su huella. La
 //!   clave privada no esta en GitHub. Sin firma valida, no se abre.
+//! - Lo firmado incluye la version (firma v2, ver signed_message): si no, quien
+//!   se quedara con el repositorio podia volver a publicar un instalador VIEJO,
+//!   firmado de verdad y con fallas ya arregladas, como si fuera una version
+//!   nueva. La v1 (sin version, el `.sig`) ya no se acepta; tools/firmar la
+//!   sigue generando solo para que Michi 0.1.9 y anteriores puedan actualizar.
+//! - La huella y la firma se calculan sobre el archivo abierto sin permiso de
+//!   escritura para nadie mas, y asi queda hasta que se abre el instalador: otro
+//!   programa no lo puede cambiar entre la verificacion y la ejecucion.
 //! - Despues se abre, y Michi se cierra para que pueda reemplazarlo.
 
+use std::fs::File;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -42,7 +52,7 @@ const UPDATE_KEY: [u8; 32] = [
     0x9b, 0xc9, 0xc5, 0x81, 0x44, 0xd6, 0x32, 0x03, 0x0a, 0x62, 0x43, 0x86, 0x32,
 ];
 /// Lo que se firma antes de la huella del instalador (igual en tools/firmar).
-const SIGNATURE_CONTEXT: &[u8] = b"Michi-actualizacion-v1\0";
+const SIGNATURE_CONTEXT: &[u8] = b"Michi-actualizacion-v2\0";
 
 /// Una version publicada en GitHub.
 #[derive(Clone, Debug)]
@@ -55,7 +65,7 @@ pub struct Release {
     pub size: u64,
     /// Huella SHA-256 del instalador, en hexadecimal (si GitHub la da).
     pub sha256: Option<String>,
-    /// La firma del instalador ("<instalador>.sig" en la misma version).
+    /// La firma v2 del instalador ("<instalador>.v2.sig" en la misma version).
     pub signature_url: Option<String>,
 }
 
@@ -85,7 +95,9 @@ pub struct Status {
 pub enum Event {
     Checked(Result<Option<Release>, String>),
     Progress(f64),
-    Downloaded(PathBuf),
+    /// El instalador verificado, y el archivo abierto que impide cambiarlo
+    /// hasta que se abre (ver open_locked).
+    Downloaded(PathBuf, Arc<File>),
     DownloadFailed(String),
 }
 
@@ -181,7 +193,7 @@ fn parse_release(json: &Value) -> Option<Release> {
         return None;
     }
     let asset_name = asset.get("name")?.as_str()?.to_string();
-    let signature_name = format!("{asset_name}.sig");
+    let signature_name = format!("{asset_name}.v2.sig");
     let signature_url = json.get("assets")?.as_array()?.iter().find_map(|a| {
         let name = a.get("name")?.as_str()?;
         let url = a.get("browser_download_url")?.as_str()?;
@@ -232,10 +244,13 @@ pub fn on_event(state: &Shared, event: Event) {
             }
         }
         Event::DownloadFailed(e) => state.borrow_mut().update.phase = Phase::Failed(e),
-        Event::Downloaded(path) => {
+        Event::Downloaded(path, lock) => {
             state.borrow_mut().update.phase = Phase::Installing;
             push(state);
-            if std::process::Command::new(&path).spawn().is_ok() {
+            let started = std::process::Command::new(&path).spawn().is_ok();
+            // Recien ahora se suelta: hasta aca nadie lo pudo cambiar.
+            drop(lock);
+            if started {
                 // El instalador reemplaza michi.exe: Michi tiene que estar cerrado.
                 crate::security::quit(state);
             } else {
@@ -262,13 +277,13 @@ pub fn install(state: &Shared) {
             let _ = proxy.send_event(UserEvent::Update(e));
         };
         match download(&release, &|p| send(Event::Progress(p))) {
-            Ok(path) => send(Event::Downloaded(path)),
+            Ok((path, lock)) => send(Event::Downloaded(path, Arc::new(lock))),
             Err(e) => send(Event::DownloadFailed(e)),
         }
     });
 }
 
-fn download(release: &Release, progress: &dyn Fn(f64)) -> Result<PathBuf, String> {
+fn download(release: &Release, progress: &dyn Fn(f64)) -> Result<(PathBuf, File), String> {
     let dir = std::env::temp_dir().join("Michi-Update");
     std::fs::create_dir_all(&dir).map_err(|_| "No se pudo preparar la carpeta temporal".to_string())?;
     // Solo el nombre del archivo (nunca una ruta que venga de afuera).
@@ -281,8 +296,7 @@ fn download(release: &Release, progress: &dyn Fn(f64)) -> Result<PathBuf, String
     let response = agent().get(&release.asset_url).call().map_err(|_| "No se pudo descargar la versión nueva".to_string())?;
     let total = response.header("Content-Length").and_then(|v| v.parse::<u64>().ok()).unwrap_or(release.size);
     let mut reader = response.into_reader().take(MAX_SIZE);
-    let mut file = std::fs::File::create(&path).map_err(|_| "No se pudo guardar el instalador".to_string())?;
-    let mut hash = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut file = File::create(&path).map_err(|_| "No se pudo guardar el instalador".to_string())?;
     let (mut done, mut last_pct) = (0u64, 0u64);
     let mut buf = vec![0u8; 64 * 1024];
     loop {
@@ -291,7 +305,6 @@ fn download(release: &Release, progress: &dyn Fn(f64)) -> Result<PathBuf, String
             break;
         }
         file.write_all(&buf[..n]).map_err(|_| "No se pudo guardar el instalador".to_string())?;
-        hash.update(&buf[..n]);
         done += n as u64;
         if total > 0 && done * 100 / total > last_pct {
             last_pct = done * 100 / total;
@@ -300,25 +313,67 @@ fn download(release: &Release, progress: &dyn Fn(f64)) -> Result<PathBuf, String
     }
     drop(file);
 
-    let fail = |msg: &str| {
-        let _ = std::fs::remove_file(&path);
-        Err(msg.to_string())
+    let checked = if release.size > 0 && done != release.size {
+        Err("La descarga quedó incompleta".to_string())
+    } else {
+        open_locked(&path)
+            .map_err(|_| "No se pudo verificar el instalador".to_string())
+            .and_then(|lock| verify(release, &lock).map(|()| lock))
     };
-    if release.size > 0 && done != release.size {
-        return fail("La descarga quedó incompleta");
+    match checked {
+        Ok(lock) => Ok((path, lock)),
+        Err(e) => {
+            // `lock` ya se cerro (si no, no se podria borrar).
+            let _ = std::fs::remove_file(&path);
+            Err(e)
+        }
+    }
+}
+
+/// Abre el instalador para leerlo sin dejar que nadie mas lo abra para
+/// escribirlo, borrarlo o renombrarlo mientras siga abierto (si alguien ya
+/// lo tenia abierto para escribir, falla). Abrirlo para ejecutarlo si se
+/// puede: es una lectura.
+#[cfg(windows)]
+fn open_locked(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 0x1;
+    std::fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(path)
+}
+
+#[cfg(not(windows))]
+fn open_locked(path: &Path) -> std::io::Result<File> {
+    File::open(path)
+}
+
+/// Huella, version y firma del instalador ya descargado, leido de `lock` (ver
+/// open_locked): lo que se verifica es exactamente lo que se va a ejecutar.
+fn verify(release: &Release, lock: &File) -> Result<(), String> {
+    let mut hash = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut reader = lock;
+    loop {
+        let n = reader.read(&mut buf).map_err(|_| "No se pudo verificar el instalador".to_string())?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buf[..n]);
     }
     let digest = hash.finish();
     let hex: String = digest.as_ref().iter().map(|b| format!("{b:02x}")).collect();
     if release.sha256.as_ref().is_some_and(|expected| *expected != hex) {
-        return fail("El instalador descargado no coincide con el publicado: no se abrió");
+        return Err("El instalador descargado no coincide con el publicado: no se abrió".into());
+    }
+    if !is_newer(&release.version, env!("CARGO_PKG_VERSION")) {
+        return Err("La versión publicada no es más nueva que la instalada: no se abrió".into());
     }
     let Some(signature) = release.signature_url.as_deref().and_then(fetch_signature) else {
-        return fail("La versión nueva no trae su firma: no se abrió el instalador");
+        return Err("La versión nueva no trae su firma: no se abrió el instalador".into());
     };
-    if !signature_ok(&UPDATE_KEY, digest.as_ref(), &signature) {
-        return fail("La firma del instalador no es la de Michi: no se abrió");
+    if !signature_ok(&UPDATE_KEY, &release.version, digest.as_ref(), &signature) {
+        return Err("La firma del instalador no es la de Michi para esta versión: no se abrió".into());
     }
-    Ok(path)
+    Ok(())
 }
 
 /// El .sig de la version (unos pocos bytes en base64).
@@ -329,12 +384,18 @@ fn fetch_signature(url: &str) -> Option<String> {
     Some(body)
 }
 
-/// Si `signature` (base64) es la firma de `public_key` sobre la huella
-/// SHA-256 `digest` del instalador (ver tools/firmar).
-fn signature_ok(public_key: &[u8], digest: &[u8], signature: &str) -> bool {
+/// Lo que se firma (v2, igual en tools/firmar): el contexto, la version del
+/// instalador ("0.1.10", la de la etiqueta sin la "v"), un \0 y su SHA-256.
+fn signed_message(version: &str, digest: &[u8]) -> Vec<u8> {
+    [SIGNATURE_CONTEXT, version.as_bytes(), b"\0", digest].concat()
+}
+
+/// Si `signature` (base64) es la firma de `public_key` sobre la version y la
+/// huella SHA-256 `digest` del instalador (ver tools/firmar).
+fn signature_ok(public_key: &[u8], version: &str, digest: &[u8], signature: &str) -> bool {
     use base64::Engine;
     let Ok(sig) = base64::engine::general_purpose::STANDARD.decode(signature.trim()) else { return false };
-    let message = [SIGNATURE_CONTEXT, digest].concat();
+    let message = signed_message(version, digest);
     ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, public_key).verify(&message, &sig).is_ok()
 }
 
@@ -400,6 +461,11 @@ mod tests {
                     "name": "Michi-Setup-0.2.0.exe.sig",
                     "browser_download_url": "https://github.com/kilorito2/michi/releases/download/v0.2.0/Michi-Setup-0.2.0.exe.sig",
                     "size": 89
+                },
+                {
+                    "name": "Michi-Setup-0.2.0.exe.v2.sig",
+                    "browser_download_url": "https://github.com/kilorito2/michi/releases/download/v0.2.0/Michi-Setup-0.2.0.exe.v2.sig",
+                    "size": 89
                 }
             ]
         });
@@ -408,9 +474,10 @@ mod tests {
         assert_eq!(r.asset_name, "Michi-Setup-0.2.0.exe");
         assert_eq!(r.size, 1234);
         assert_eq!(r.sha256.as_deref(), Some("abcdef"));
-        assert!(r.signature_url.as_deref().is_some_and(|u| u.ends_with("Michi-Setup-0.2.0.exe.sig")));
+        assert!(r.signature_url.as_deref().is_some_and(|u| u.ends_with("Michi-Setup-0.2.0.exe.v2.sig")));
 
-        // Sin .sig la version se ve, pero el instalador no se va a abrir.
+        // Solo con la firma v1 (la de Michi 0.1.9 y anteriores) la version se
+        // ve, pero el instalador no se va a abrir.
         let mut unsigned = json.clone();
         unsigned["assets"].as_array_mut().unwrap().pop();
         assert_eq!(parse_release(&unsigned).unwrap().signature_url, None);
@@ -430,29 +497,60 @@ mod tests {
         let other = Ed25519KeyPair::from_pkcs8(Ed25519KeyPair::generate_pkcs8(&rng).unwrap().as_ref()).unwrap();
         let digest = ring::digest::digest(&ring::digest::SHA256, b"instalador");
         let b64 = |sig: ring::signature::Signature| base64::engine::general_purpose::STANDARD.encode(sig.as_ref());
-        let message = [SIGNATURE_CONTEXT, digest.as_ref()].concat();
-        let good = b64(pair.sign(&message));
+        let good = b64(pair.sign(&signed_message("0.2.0", digest.as_ref())));
+        let key = pair.public_key().as_ref();
 
-        assert!(signature_ok(pair.public_key().as_ref(), digest.as_ref(), &format!("{good}\n")));
+        assert!(signature_ok(key, "0.2.0", digest.as_ref(), &format!("{good}\n")));
         // Otra clave, otro archivo, o una firma rota: no.
-        assert!(!signature_ok(other.public_key().as_ref(), digest.as_ref(), &good));
+        assert!(!signature_ok(other.public_key().as_ref(), "0.2.0", digest.as_ref(), &good));
         let other_file = ring::digest::digest(&ring::digest::SHA256, b"otro");
-        assert!(!signature_ok(pair.public_key().as_ref(), other_file.as_ref(), &good));
-        assert!(!signature_ok(pair.public_key().as_ref(), digest.as_ref(), "no es base64"));
+        assert!(!signature_ok(key, "0.2.0", other_file.as_ref(), &good));
+        assert!(!signature_ok(key, "0.2.0", digest.as_ref(), "no es base64"));
         // La firma del mismo hash sin el contexto tampoco sirve.
-        assert!(!signature_ok(pair.public_key().as_ref(), digest.as_ref(), &b64(pair.sign(digest.as_ref()))));
+        assert!(!signature_ok(key, "0.2.0", digest.as_ref(), &b64(pair.sign(digest.as_ref()))));
+        // Un instalador viejo, firmado de verdad, publicado como otra version: no.
+        assert!(!signature_ok(key, "0.3.0", digest.as_ref(), &good));
+        assert!(!signature_ok(key, "0.2.00", digest.as_ref(), &good));
+        // Ni la firma v1 (sin version) de ese mismo instalador.
+        let v1 = b64(pair.sign(&[b"Michi-actualizacion-v1\0".as_slice(), digest.as_ref()].concat()));
+        assert!(!signature_ok(key, "0.2.0", digest.as_ref(), &v1));
+    }
+
+    /// El instalador verificado no se puede cambiar mientras Michi lo tiene
+    /// abierto, y aun asi se puede ejecutar.
+    #[cfg(windows)]
+    #[test]
+    fn the_verified_installer_cannot_change_before_it_runs() {
+        let dir = std::env::temp_dir().join(format!("michi-prueba-instalador-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("instalador.exe");
+        let system = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| "C:/Windows".into());
+        std::fs::copy(system.join("System32").join("whoami.exe"), &exe).unwrap();
+
+        let lock = open_locked(&exe).unwrap();
+        assert!(std::fs::OpenOptions::new().write(true).open(&exe).is_err());
+        assert!(std::fs::remove_file(&exe).is_err());
+        assert!(std::fs::rename(&exe, dir.join("otro.exe")).is_err());
+        let status = std::process::Command::new(&exe).stdout(std::process::Stdio::null()).status().unwrap();
+        assert!(status.success());
+        drop(lock);
+
+        assert!(std::fs::OpenOptions::new().write(true).open(&exe).is_ok());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Comprueba que un instalador firmado con tools/firmar pase con la clave
-    /// que lleva Michi: `MICHI_VERIFICAR=<instalador.exe> cargo test -- --ignored verifica`.
+    /// que lleva Michi: `MICHI_VERIFICAR=<instalador.exe> MICHI_VERSION=<x.y.z>
+    /// cargo test -- --ignored verifica`.
     #[test]
     #[ignore]
     fn verifica_un_instalador_firmado() {
         let path = std::env::var("MICHI_VERIFICAR").expect("MICHI_VERIFICAR=<instalador.exe>");
+        let version = std::env::var("MICHI_VERSION").expect("MICHI_VERSION=<x.y.z>");
         let bytes = std::fs::read(&path).unwrap();
-        let signature = std::fs::read_to_string(format!("{path}.sig")).unwrap();
+        let signature = std::fs::read_to_string(format!("{path}.v2.sig")).unwrap();
         let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
-        assert!(signature_ok(&UPDATE_KEY, digest.as_ref(), &signature), "la firma no es de la clave de Michi");
+        assert!(signature_ok(&UPDATE_KEY, &version, digest.as_ref(), &signature), "la firma no es de la clave de Michi");
     }
 
     /// Descarga de verdad el instalador de la ultima version publicada y lo
@@ -462,7 +560,8 @@ mod tests {
     fn downloads_and_verifies_the_latest_installer() {
         let release = fetch_latest().unwrap().unwrap();
         assert!(release.sha256.is_some(), "GitHub no dio la huella SHA-256");
-        let path = download(&release, &|_| {}).unwrap();
+        let (path, lock) = download(&release, &|_| {}).unwrap();
+        drop(lock);
         assert_eq!(std::fs::metadata(&path).unwrap().len(), release.size);
         let _ = std::fs::remove_file(path);
     }

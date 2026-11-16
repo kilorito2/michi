@@ -64,13 +64,16 @@ try {
 "== Listo: $out ({0:N1} MB)" -f ((Get-Item $out).Length / 1MB)
 
 # La firma para las actualizaciones (ver src/update.rs y tools/firmar): Michi
-# no abre un instalador descargado sin su .sig. La clave privada vive fuera del
+# no abre un instalador descargado sin su .v2.sig (firma con la version
+# adentro); el .sig (v1) es para que Michi 0.1.9 y anteriores puedan
+# actualizar. La clave privada vive fuera del
 # proyecto (y fuera de GitHub); MICHI_CLAVE_FIRMA puede apuntar a otra.
 $key = if ($env:MICHI_CLAVE_FIRMA) { $env:MICHI_CLAVE_FIRMA } else { Join-Path $env:USERPROFILE '.michi\clave-actualizaciones.pk8' }
 if (-not (Test-Path $key)) {
-    throw "No esta la clave para firmar ($key). Sin el .sig, Michi no instala esta version desde Actualizar."
+    throw "No esta la clave para firmar ($key). Sin las firmas, Michi no instala esta version desde Actualizar."
 }
 "== Firmando para las actualizaciones"
-cargo run --release -q -p michi-firmar -- firmar $out $key
+cargo run --release -q -p michi-firmar -- firmar $out $key $version
 if ($LASTEXITCODE -ne 0) { throw "fallo la firma" }
-"== Publicar en la version de GitHub los DOS archivos: $(Split-Path $out -Leaf) y $(Split-Path $out -Leaf).sig"
+$leaf = Split-Path $out -Leaf
+"== Publicar en la version de GitHub (etiqueta v$version) los TRES archivos: $leaf, $leaf.v2.sig y $leaf.sig"

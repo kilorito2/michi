@@ -301,10 +301,13 @@ la última versión publicada. Si hay una más nueva, aparece **Actualizar** en 
 barra, y en **Ajustes › Acerca de** el botón **Descargar e instalar**: baja el
 instalador por HTTPS desde GitHub, comprueba que su tamaño y su huella SHA-256
 sean los que publica GitHub para ese archivo y que venga **firmado con la clave
-de Michi** (su `.sig`; la clave pública va dentro de Michi y la privada no está
-en GitHub), lo abre y Michi se cierra para que pueda reemplazarlo. Si la firma
-falta o no coincide, no se abre: así, ni quien se quedara con la cuenta de
-GitHub podría colar un instalador. Nada se descarga ni se instala sin que lo
+de Michi** (su `.v2.sig`; la clave pública va dentro de Michi y la privada no
+está en GitHub), lo abre y Michi se cierra para que pueda reemplazarlo. Si la
+firma falta o no coincide, no se abre: así, ni quien se quedara con la cuenta de
+GitHub podría colar un instalador. La firma incluye el número de versión, así
+que tampoco podría volver a publicar un instalador viejo como si fuera nuevo, y
+mientras Michi lo verifica y lo abre ningún otro programa lo puede cambiar.
+Nada se descarga ni se instala sin que lo
 pidas, y la búsqueda automática se apaga en el mismo lugar (*Buscar ahora*
 sigue andando).
 
@@ -434,7 +437,7 @@ estándar.
 | <img src="docs/icons/descargas.svg" width="20" height="20" alt=""> | **Descargas peligrosas** | Ejecutables, scripts y accesos directos esperan tu decisión; imágenes, PDF, documentos o `.zip` se descargan sin preguntar. Lo que frena SmartScreen queda "Bloqueado". |
 | <img src="docs/icons/marca-web.svg" width="20" height="20" alt=""> | **Marca de la Web** | Todo lo descargado lleva `Zone.Identifier`: Windows lo revisa antes de ejecutarlo y Office lo abre en Vista protegida. |
 | <img src="docs/icons/firma.svg" width="20" height="20" alt=""> | **Firma de extensiones** | Los `.crx` se verifican como en Chrome (CRX3, RSA/ECDSA), tienen que ser exactamente la extensión pedida y nunca una versión más vieja que la instalada. |
-| <img src="docs/icons/actualizar.svg" width="20" height="20" alt=""> | **Actualizaciones firmadas** | Un instalador descargado solo se abre con la firma de la clave de Michi (Ed25519), además de la huella de GitHub. |
+| <img src="docs/icons/actualizar.svg" width="20" height="20" alt=""> | **Actualizaciones firmadas** | Un instalador descargado solo se abre con la firma de la clave de Michi (Ed25519) sobre su huella y su versión (nada de volver a una versión vieja), además de la huella de GitHub. |
 | <img src="docs/icons/zip.svg" width="20" height="20" alt=""> | **Anti *zip bomba*** | Las extensiones se descomprimen con topes (512 MB, 20 000 archivos) en una carpeta temporal. |
 | <img src="docs/icons/paginas-internas.svg" width="20" height="20" alt=""> | **Páginas internas blindadas** | CSP con *nonce*, sin poder mostrarse dentro de un iframe ajeno, y `Cross-Origin-Resource-Policy`. |
 | <img src="docs/icons/ipc.svg" width="20" height="20" alt=""> | **IPC verificado** | Los comandos solo se aceptan según la URL real de la página que los envía (la pone WebView2, no se puede falsear), y cada página solo tiene los que usa. |
@@ -619,9 +622,11 @@ powershell -ExecutionPolicy Bypass -File tools\build_installer.ps1
 Genera **`dist\Michi-Setup-<versión>.exe`** (~39 MB, un solo archivo):
 compila en *release* el navegador y el instalador (`installer/`) y le pega al
 final del instalador el `.exe` y los fondos, con el SHA-256 de cada uno.
-Después lo firma para las actualizaciones (`dist\Michi-Setup-<versión>.exe.sig`,
-con [`tools/firmar`](tools/firmar)): en la versión de GitHub se publican **los
-dos archivos**, o Michi no la instala desde *Actualizar*.
+Después lo firma para las actualizaciones con [`tools/firmar`](tools/firmar):
+`dist\Michi-Setup-<versión>.exe.v2.sig` (con la versión adentro, la que exige
+Michi desde 0.1.10) y `.exe.sig` (la de antes, para que Michi 0.1.9 y anteriores
+puedan actualizar). En la versión de GitHub, con la etiqueta `v<versión>`, se
+publican **los tres archivos**, o Michi no la instala desde *Actualizar*.
 
 La clave privada está en `%USERPROFILE%\.michi\clave-actualizaciones.pk8` (o
 donde diga `MICHI_CLAVE_FIRMA`), nunca en el repositorio. Guarda una copia: si
@@ -779,7 +784,7 @@ installer/            el instalador
 tools/
   encode_wallpapers.sh  genera assets/wallpapers/optimized/
   make_icon.ps1         genera michi.ico y michi-256.png
-  build_installer.ps1   genera dist\Michi-Setup-<versión>.exe (y su .sig)
+  build_installer.ps1   genera dist\Michi-Setup-<versión>.exe (y sus firmas)
   firmar/               firma los instaladores para las actualizaciones
 assets/icon/          el zorro: original, .ico y logo
 docs/img/             imágenes de este README
