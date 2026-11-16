@@ -196,8 +196,14 @@ pub fn app_builder<'a>() -> WebViewBuilder<'a> {
 /// soltando encima un enlace o un archivo arrastrado desde una pestana, ni
 /// por nada que se ejecute adentro: una pagina ajena ahi tendria todos los
 /// comandos de ipc::dispatch (cerrar pestanas, instalar extensiones...).
+///
+/// Sin los atajos propios de navegador de WebView2 (F5/Ctrl+R recargaban la
+/// barra misma, Ctrl+P la imprimia, Ctrl+F buscaba en el panel). Los de
+/// edicion (Ctrl+C/V/X/A/Z, Inicio, Fin) siguen andando, y los de Michi
+/// tambien: llegan por AcceleratorKeyPressed (ver shortcuts::attach). El menu
+/// del clic derecho se filtra aparte (ver context_menu::attach_ui).
 pub fn chrome_builder<'a>() -> WebViewBuilder<'a> {
-    app_builder().with_navigation_handler(|url| {
+    app_builder().with_browser_accelerator_keys(false).with_navigation_handler(|url| {
         let ok = own_page_path(&url).is_some();
         if !ok {
             eprintln!("[seguridad] la interfaz no puede navegar a {url}");

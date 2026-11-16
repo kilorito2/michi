@@ -58,6 +58,13 @@ pub fn attach(state: &Shared, webview: &WebView, id: u64) {
             let page = tab.map(|t| t.url.clone()).unwrap_or_default();
             (incognito, storage::engine(&st.settings.search_engine).1, page)
         };
+        // En nuestras paginas (pestana nueva, ajustes, avisos) el menu de
+        // WebView2 solo ofrecia "Volver a cargar / Guardar como / Imprimir"
+        // sobre la propia pagina: solo queda en los campos de texto.
+        if hide_menu(crate::state::is_own_page(&page), flag(&|p| unsafe { target.IsEditable(p) })) {
+            unsafe { args.SetHandled(true)? };
+            return Ok(());
+        }
 
         let mut extra: Vec<(String, Choice)> = Vec::new();
         if flag(&|p| unsafe { target.HasLinkUri(p) }) {
@@ -138,6 +145,32 @@ pub fn attach(state: &Shared, webview: &WebView, id: u64) {
 }
 
 /// Saca del menu la opcion de WebView2 con ese nombre (si esta).
+/// La interfaz (barra, paneles, menu, sugerencias, aviso): el menu de WebView2
+/// solo en los campos de texto (cortar, copiar, pegar en la barra de
+/// direcciones o en el buscador del historial). En el resto ofrecia "Volver a
+/// cargar", "Guardar como" o "Imprimir" sobre la propia interfaz.
+pub fn attach_ui(webview: &WebView) {
+    let Ok(core11) = webview.webview().cast::<ICoreWebView2_11>() else { return };
+    let handler = ContextMenuRequestedEventHandler::create(Box::new(move |_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let target = unsafe { args.ContextMenuTarget()? };
+        let mut editable = BOOL(0);
+        let _ = unsafe { target.IsEditable(&mut editable) };
+        if hide_menu(true, editable.as_bool()) {
+            unsafe { args.SetHandled(true)? };
+        }
+        Ok(())
+    }));
+    let mut token = 0i64;
+    let _ = unsafe { core11.add_ContextMenuRequested(&handler, &mut token) };
+}
+
+/// Si el menu del clic derecho no se muestra: en nuestras paginas, salvo
+/// sobre un campo de texto.
+fn hide_menu(own_page: bool, editable: bool) -> bool {
+    own_page && !editable
+}
+
 fn remove_named(items: &ICoreWebView2ContextMenuItemCollection, name: &str) {
     let mut count = 0u32;
     let _ = unsafe { items.Count(&mut count) };
@@ -164,6 +197,14 @@ fn run(state: &Shared, choice: Choice, from_incognito: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn internal_pages_only_get_the_menu_in_text_fields() {
+        assert!(hide_menu(true, false));
+        assert!(!hide_menu(true, true));
+        assert!(!hide_menu(false, false));
+        assert!(!hide_menu(false, true));
+    }
 
     #[test]
     fn long_selections_are_shortened_to_one_line() {

@@ -108,6 +108,7 @@ impl ApplicationHandler<UserEvent> for App {
         let notice = notice::build(&self.state);
         for wv in [&topbar, &left, &right, &menu, &suggestions, &notice] {
             security::harden(&self.state, wv);
+            context_menu::attach_ui(wv);
             shortcuts::attach(&self.state, wv, wv_is_chrome(wv, &topbar, &left, &right));
             recovery::attach(&self.state, wv, None);
         }
