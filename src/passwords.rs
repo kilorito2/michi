@@ -6,8 +6,9 @@
 //!
 //! - Guardar: ui/content_init.js avisa cuando se envia un formulario con una
 //!   contrasena ("michi:pw:" + {u, p}, solo desde la pagina principal, nunca
-//!   un iframe). La barra pregunta "Guardar la contrasena?" y nada se guarda
-//!   sin un clic. El sitio sale de la URL real del documento que la envio (la
+//!   un iframe). Cuando el inicio de sesion salio bien (ver verdict), la barra
+//!   pregunta "Guardar la contrasena?" y nada se guarda sin un clic. El sitio
+//!   sale de la URL real del documento que la envio (la
 //!   pone WebView2): una pagina no puede ofrecer contrasenas de otro sitio.
 //! - Disco: passwords.json, con cada contrasena cifrada por Windows (DPAPI,
 //!   atada a tu usuario de Windows). Otro usuario de la PC, o el archivo
@@ -42,6 +43,11 @@ const OFFER_FOR: Duration = Duration::from_secs(180);
 const CLIPBOARD_FOR: Duration = Duration::from_secs(30);
 /// Como mucho un aviso de "se envio una contrasena" por pestana cada...
 const CAPTURE_EVERY: Duration = Duration::from_secs(3);
+/// Cuanto despues de enviar se empieza a mirar si el inicio de sesion salio
+/// bien, cada cuanto se vuelve a mirar, y hasta cuando (ver verdict).
+const CONFIRM_MIN: Duration = Duration::from_millis(1500);
+const CONFIRM_EVERY: Duration = Duration::from_millis(700);
+const CONFIRM_MAX: Duration = Duration::from_secs(20);
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
@@ -80,7 +86,49 @@ pub struct Offer {
     password: String,
     /// Ya habia una para ese usuario: se ofrece actualizarla.
     update: Option<u64>,
+    /// El inicio de sesion salio bien (ver check_offers): recien ahi la barra
+    /// pregunta. Antes preguntaba tambien con una contrasena equivocada.
+    confirmed: bool,
+    /// Hay un chequeo de la pagina en curso.
+    checking: bool,
+    /// Cuando mirar la pagina otra vez.
+    next_check: Instant,
 }
+
+/// Lo que se decide al mirar la pagina despues de enviar una contrasena.
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    /// Ya no hay campo de contrasena: entro. Se pregunta.
+    Confirm,
+    /// Sigue pidiendo la contrasena despues de CONFIRM_MAX: no entro.
+    Drop,
+    /// Sigue el campo, pero puede estar entrando todavia: mirar de nuevo.
+    Retry,
+}
+
+/// Como Chrome: la contrasena se ofrece guardar cuando el formulario de
+/// inicio de sesion desaparece (la pagina siguiente ya no pide contrasena, o
+/// un sitio de una sola pagina lo saco). Si despues de CONFIRM_MAX sigue
+/// pidiendola, el inicio de sesion fallo y la oferta se olvida sin mostrarla.
+fn verdict(password_field_visible: bool, elapsed: Duration) -> Verdict {
+    if !password_field_visible {
+        Verdict::Confirm
+    } else if elapsed >= CONFIRM_MAX {
+        Verdict::Drop
+    } else {
+        Verdict::Retry
+    }
+}
+
+/// Si ya se puede mirar la pagina: no enseguida de enviar (la pagina todavia
+/// es la del formulario) ni mientras carga la siguiente.
+fn ready_to_check(elapsed: Duration, loading: bool) -> bool {
+    elapsed >= CONFIRM_MIN && !loading
+}
+
+/// Hay un campo de contrasena visible en la pagina (lo corre check_offers).
+const FIELD_SCRIPT: &str = "Array.prototype.some.call(document.querySelectorAll('input[type=password]'), \
+    function (e) { return !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length); })";
 
 /// Lo que se pidio en Ajustes y espera la verificacion de Windows Hello.
 #[derive(Debug, Clone)]
@@ -204,7 +252,17 @@ pub fn on_captured(state: &Shared, tab_id: u64, source: &str, raw: &str) {
             None => None,
         };
         let Some(tab) = st.tabs.iter_mut().find(|t| t.id == tab_id && !t.incognito) else { return };
-        tab.password_offer = Some(Offer { at: Instant::now(), origin, username, password, update });
+        let now = Instant::now();
+        tab.password_offer = Some(Offer {
+            at: now,
+            origin,
+            username,
+            password,
+            update,
+            confirmed: false,
+            checking: false,
+            next_check: now + CONFIRM_MIN,
+        });
         true
     };
     if changed {
@@ -220,7 +278,7 @@ fn capture_allowed(last: Option<Instant>, now: Instant) -> bool {
 
 /// Lo que muestra la barra para la oferta de la pestana activa.
 pub fn offer_view(offer: &Option<Offer>) -> Value {
-    match offer.as_ref().filter(|o| o.at.elapsed() < OFFER_FOR) {
+    match offer.as_ref().filter(|o| o.confirmed && o.at.elapsed() < OFFER_FOR) {
         Some(o) => json!({
             "host": security::host_of(&o.origin).unwrap_or_default(),
             "username": o.username,
@@ -228,6 +286,75 @@ pub fn offer_view(offer: &Option<Offer>) -> Value {
         }),
         None => Value::Null,
     }
+}
+
+/// Desde el bucle de eventos: mira las paginas que tienen una oferta sin
+/// confirmar (ver verdict). Devuelve cuando volver a mirar.
+pub fn check_offers(state: &Shared) -> Option<Instant> {
+    let now = Instant::now();
+    let mut due = Vec::new();
+    let mut next: Option<Instant> = None;
+    {
+        let mut st = state.borrow_mut();
+        for tab in st.tabs.iter_mut() {
+            let loading = tab.loading;
+            let Some(offer) = tab.password_offer.as_mut().filter(|o| !o.confirmed && !o.checking) else { continue };
+            if now < offer.next_check {
+                next = Some(next.map_or(offer.next_check, |n| n.min(offer.next_check)));
+                continue;
+            }
+            if !ready_to_check(now.duration_since(offer.at), loading) {
+                offer.next_check = now + Duration::from_millis(300);
+                next = Some(next.map_or(offer.next_check, |n| n.min(offer.next_check)));
+                continue;
+            }
+            offer.checking = true;
+            due.push((tab.id, wry::WebViewExtWindows::webview(&tab.webview)));
+        }
+    }
+    // Sin prestamos vivos: el resultado llega despues, en el callback.
+    for (id, core) in due {
+        let s = state.clone();
+        let handler = webview2_com::ExecuteScriptCompletedHandler::create(Box::new(move |result, json| {
+            // Si el script no se pudo correr, se toma como que sigue el campo.
+            let visible = result.is_err() || json.trim() != "false";
+            on_checked(&s, id, visible);
+            Ok(())
+        }));
+        let started = unsafe { core.ExecuteScript(&windows_core::HSTRING::from(FIELD_SCRIPT), &handler) };
+        if started.is_err() {
+            on_checked(state, id, true);
+        }
+    }
+    next
+}
+
+/// El resultado de mirar la pagina de la pestana `id` (ver check_offers).
+fn on_checked(state: &Shared, id: u64, field_visible: bool) {
+    let show = {
+        let mut st = state.borrow_mut();
+        let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) else { return };
+        let Some(offer) = tab.password_offer.as_mut() else { return };
+        offer.checking = false;
+        match verdict(field_visible, offer.at.elapsed()) {
+            Verdict::Confirm => {
+                offer.confirmed = true;
+                true
+            }
+            Verdict::Drop => {
+                tab.password_offer = None;
+                false
+            }
+            Verdict::Retry => {
+                offer.next_check = Instant::now() + CONFIRM_EVERY;
+                false
+            }
+        }
+    };
+    if show {
+        sync::push_active_tab(state);
+    }
+    state.borrow().wake();
 }
 
 /// La respuesta a "Guardar la contrasena?" de la pestana activa:
@@ -652,6 +779,33 @@ mod tests {
         assert!(!secret.contains("gatito"));
         assert_eq!(unprotect(&secret).as_deref(), Some("gatito-123 ñ"));
         assert_eq!(unprotect("no es base64 de dpapi"), None);
+    }
+
+    #[test]
+    fn the_question_waits_until_the_login_worked() {
+        // Enseguida de enviar, o con la pagina siguiente cargando: todavia no se mira.
+        assert!(!ready_to_check(Duration::from_millis(500), false));
+        assert!(!ready_to_check(Duration::from_secs(3), true));
+        assert!(ready_to_check(CONFIRM_MIN, false));
+        // Ya no pide contrasena: entro.
+        assert_eq!(verdict(false, Duration::from_secs(2)), Verdict::Confirm);
+        assert_eq!(verdict(false, CONFIRM_MAX), Verdict::Confirm);
+        // La sigue pidiendo: puede estar entrando, y al final se da por fallido.
+        assert_eq!(verdict(true, Duration::from_secs(2)), Verdict::Retry);
+        assert_eq!(verdict(true, CONFIRM_MAX), Verdict::Drop);
+        // Una oferta sin confirmar no se muestra.
+        let offer = |confirmed| Offer {
+            at: Instant::now(),
+            origin: "https://a.com".into(),
+            username: "ana".into(),
+            password: "x".into(),
+            update: None,
+            confirmed,
+            checking: false,
+            next_check: Instant::now(),
+        };
+        assert_eq!(offer_view(&Some(offer(false))), Value::Null);
+        assert_eq!(offer_view(&Some(offer(true)))["username"], "ana");
     }
 
     #[test]

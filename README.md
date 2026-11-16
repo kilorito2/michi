@@ -252,7 +252,9 @@ Michi tiene su propio gestor de contraseñas (WebView2 sabe guardarlas, pero no
 deja verlas ni administrarlas):
 
 - Al iniciar sesión en un sitio, la barra pregunta **¿Guardar la contraseña?**
-  (o **¿Actualizarla?**, si cambió). *Nunca en este sitio* lo recuerda.
+  (o **¿Actualizarla?**, si cambió). *Nunca en este sitio* lo recuerda. Como en
+  Chrome, pregunta cuando el inicio de sesión salió bien (el sitio ya no pide
+  la contraseña): con una contraseña equivocada no pregunta nada.
 - Después, la **llave** de la barra de direcciones las rellena: con una sola
   cuenta, de un clic; con varias, eliges cuál. Nunca se rellenan solas al
   cargar la página, donde cualquier script del sitio las podría leer antes que

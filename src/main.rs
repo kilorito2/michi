@@ -249,6 +249,7 @@ impl ApplicationHandler<UserEvent> for App {
         let perf = perf::tick(&self.state);
         let update = update::tick(&self.state);
         let notice = notice::tick(&self.state);
+        let passwords = passwords::check_offers(&self.state);
         let assistant = control::tick(&self.state);
         // Historial, sesion y logos: se escriben juntos cuando vence el plazo.
         let saves = {
@@ -270,6 +271,7 @@ impl ApplicationHandler<UserEvent> for App {
             .chain(perf)
             .chain(update)
             .chain(notice)
+            .chain(passwords)
             .chain(assistant)
             .chain(saves)
             .min()
