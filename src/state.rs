@@ -585,7 +585,13 @@ impl AppState {
         storage::save(storage::BOOKMARKS_FILE, &self.bookmarks);
     }
 
+    /// Con "borrar datos al cerrar" el historial vive solo en memoria: si se
+    /// escribiera y el proceso se cayera, quedaria en el disco (como los
+    /// logos en suggest::remember_favicon y el zoom en zoom::remember).
     pub fn save_history(&self) {
+        if self.settings.clear_on_exit {
+            return;
+        }
         storage::save(storage::HISTORY_FILE, &self.history);
     }
 
@@ -658,5 +664,21 @@ mod tests {
         assert_eq!(own_page_path("http://app.localhost"), Some("/"));
         assert_eq!(own_page_path("app://localhost/settings#about"), Some("/settings"));
         assert_eq!(own_page_path("https://google.com/settings"), None);
+    }
+
+    #[test]
+    fn history_stays_in_memory_with_clear_on_exit() {
+        let dir = storage::test_dir::TempDataDir::new("historial");
+        let file = dir.path.join(storage::HISTORY_FILE);
+        let mut st = AppState::new();
+        st.settings.clear_on_exit = true;
+        st.history.push(storage::HistoryEntry { title: "a".into(), url: "https://a.com/".into(), time: 1 });
+        st.save_history();
+        assert!(!file.exists());
+        assert_eq!(st.history.len(), 1);
+
+        st.settings.clear_on_exit = false;
+        st.save_history();
+        assert!(file.exists());
     }
 }

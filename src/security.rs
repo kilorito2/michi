@@ -784,10 +784,9 @@ pub fn quit(state: &Shared) {
         st.history.clear();
         st.closed_tabs.clear();
         st.downloads.clear();
-        st.save_history();
         st.window.clone()
     };
-    storage::remove(storage::SESSION_FILE);
+    storage::remove_traces(true);
     crate::suggest::forget_favicons(state);
     // Sin prestamos vivos: ocultar la ventana puede disparar eventos de winit.
     if let Some(window) = window {
@@ -862,8 +861,24 @@ pub fn quit_deadline(state: &Shared) -> Option<Instant> {
 }
 
 
-/// Al arrancar con "Borrar datos al cerrar": si la ultima vez el navegador
-/// no llego a borrar (se corto la luz, se colgo), se borra ahora.
+/// Al arrancar con "Borrar datos al cerrar", antes de abrir la primera
+/// pestana: si la ultima vez el navegador no llego a borrar (se corto la luz,
+/// se colgo, o el historial lo escribio una version anterior), se borran los
+/// archivos que dicen que sitios se visitaron y lo que ya se habia leido de
+/// ellos (AppState::new los carga antes de saber nada de este ajuste).
+pub fn forget_leftover_traces(state: &Shared) {
+    let mut st = state.borrow_mut();
+    if !st.settings.clear_on_exit {
+        return;
+    }
+    storage::remove_traces(true);
+    st.history.clear();
+    st.site_zoom.clear();
+    st.suggest.favicons = Default::default();
+}
+
+/// Lo mismo para lo de WebView2 (cookies y cache): necesita un WebView ya
+/// creado, por eso va despues de crear la barra.
 pub fn clear_leftovers(state: &Shared) {
     let st = state.borrow();
     if !st.settings.clear_on_exit {

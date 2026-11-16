@@ -97,6 +97,7 @@ impl ApplicationHandler<UserEvent> for App {
         // Orden importante: primero el contenido (pestanas iniciales), luego
         // el "chrome" (barra + paneles + menu), que asi queda por encima en el
         // z-order y puede taparlo cuando un panel lateral se expande.
+        security::forget_leftover_traces(&self.state);
         open_startup_tabs(&self.state);
 
         let topbar = chrome::build_topbar(&self.state);

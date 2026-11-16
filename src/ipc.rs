@@ -621,7 +621,7 @@ fn set_setting(state: &Shared, key: &str, value: Value) {
         "performance" => perf::on_mode_changed(state),
         "savePasswords" | "autofill" => security::apply_autofill(state),
         // Lo que no tiene que quedar en el disco, desde ya.
-        "clearOnExit" if value == Value::Bool(true) => storage::remove(storage::SESSION_FILE),
+        "clearOnExit" if value == Value::Bool(true) => storage::remove_traces(true),
         _ => {}
     }
     sync::push_own_pages(state);

@@ -101,6 +101,28 @@ pub const FOLDERS_FILE: &str = "bookmark_folders.json";
 /// se borra con el historial.
 pub const SITE_ZOOM_FILE: &str = "site_zoom.json";
 
+/// Lo que dice que sitios se visitaron. Con "borrar datos al cerrar" nada de
+/// esto se escribe y, si quedo de antes (o de una sesion que se cayo), se
+/// borra (ver files_to_clear).
+pub const TRACE_FILES: &[&str] = &[SESSION_FILE, HISTORY_FILE, FAVICONS_FILE, SITE_ZOOM_FILE];
+
+/// Los archivos que hay que borrar segun "borrar datos al cerrar": al
+/// activarlo, al arrancar con el ajuste activo y al cerrar.
+pub fn files_to_clear(clear_on_exit: bool) -> &'static [&'static str] {
+    if clear_on_exit {
+        TRACE_FILES
+    } else {
+        &[]
+    }
+}
+
+/// Borra los archivos de files_to_clear.
+pub fn remove_traces(clear_on_exit: bool) {
+    for name in files_to_clear(clear_on_exit) {
+        remove(name);
+    }
+}
+
 /// Tope del historial guardado (las entradas mas viejas se descartan).
 pub const HISTORY_MAX: usize = 1000;
 
@@ -342,5 +364,63 @@ mod tests {
             resolve_input("hola mundo", "duckduckgo").unwrap(),
             "https://duckduckgo.com/?q=hola+mundo"
         );
+    }
+
+    #[test]
+    fn clear_on_exit_removes_only_what_says_where_you_went() {
+        assert!(files_to_clear(false).is_empty());
+        let files = files_to_clear(true);
+        for f in [SESSION_FILE, HISTORY_FILE, FAVICONS_FILE, SITE_ZOOM_FILE] {
+            assert!(files.contains(&f), "{f}");
+        }
+        for f in [SETTINGS_FILE, BOOKMARKS_FILE, FOLDERS_FILE] {
+            assert!(!files.contains(&f), "{f}");
+        }
+
+        let dir = test_dir::TempDataDir::new("rastros");
+        for f in TRACE_FILES.iter().chain([SETTINGS_FILE, BOOKMARKS_FILE].iter()) {
+            std::fs::write(dir.path.join(f), "{}").unwrap();
+        }
+        remove_traces(false);
+        assert!(TRACE_FILES.iter().all(|f| dir.path.join(f).exists()));
+        remove_traces(true);
+        assert!(TRACE_FILES.iter().all(|f| !dir.path.join(f).exists()));
+        assert!(dir.path.join(SETTINGS_FILE).exists());
+        assert!(dir.path.join(BOOKMARKS_FILE).exists());
+    }
+}
+
+/// Una carpeta de datos temporal para las pruebas (MICHI_DATA_DIR). La
+/// variable es de todo el proceso y las pruebas corren en paralelo: un
+/// candado global hace que las que la usan vayan de a una.
+#[cfg(test)]
+pub mod test_dir {
+    use std::path::PathBuf;
+    use std::sync::{Mutex, MutexGuard};
+
+    static LOCK: Mutex<()> = Mutex::new(());
+
+    pub struct TempDataDir {
+        pub path: PathBuf,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl TempDataDir {
+        pub fn new(tag: &str) -> Self {
+            // Una prueba que fallo con el candado tomado no tiene que tirar abajo las demas.
+            let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let path = std::env::temp_dir().join(format!("michi-prueba-{tag}-{}-{nanos}", std::process::id()));
+            std::fs::create_dir_all(&path).unwrap();
+            std::env::set_var("MICHI_DATA_DIR", &path);
+            Self { path, _guard: guard }
+        }
+    }
+
+    impl Drop for TempDataDir {
+        fn drop(&mut self) {
+            std::env::remove_var("MICHI_DATA_DIR");
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
     }
 }
