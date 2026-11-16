@@ -103,6 +103,11 @@ fn create_tab(
             .with_incognito(incognito)
             // F12 / Ctrl+Shift+I y "Herramientas de desarrollador" del menu.
             .with_devtools(true)
+            // Ctrl + rueda (y pellizcar) cambia el zoom de la pagina; zoom::attach
+            // lo recuerda por sitio. wry lo deja apagado, y asi sigue en la
+            // interfaz (security::chrome_builder). Ctrl +/-/0 los maneja
+            // shortcuts.rs (los marca como manejados: WebView2 no repite el paso).
+            .with_hotkeys_zoom(true)
             .with_initialization_script(include_str!("../ui/content_init.js"))
             // Restringido a nuestras propias paginas app:// (pestana nueva y
             // ajustes): ver ipc::dispatch_from_content. Nunca los comandos de

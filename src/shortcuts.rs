@@ -8,8 +8,15 @@
 //! con un script inyectado).
 //!
 //! Los que ya resuelve WebView2 solo (F5/Ctrl+R recargar, Alt+flechas,
-//! Ctrl+F buscar, Ctrl+P imprimir, Ctrl+rueda/+/-/0 zoom, F12 herramientas
-//! de desarrollador) no se tocan.
+//! Ctrl+F buscar, Ctrl+P imprimir, Ctrl+rueda zoom, F12 herramientas de
+//! desarrollador) no se tocan.
+//!
+//! El zoom con teclado (Ctrl +/-/0) si es nuestro, aunque las pestanas tienen
+//! el zoom de WebView2 encendido (with_hotkeys_zoom, para Ctrl + rueda): al
+//! marcar la tecla como manejada WebView2 no aplica su propio paso, asi que
+//! hay una sola via por tecla. Es la nuestra porque usa los mismos pasos que
+//! el menu, Ctrl+0 vuelve al zoom predeterminado de Ajustes (el de WebView2
+//! vuelve siempre al 100%) y funciona tambien con el foco en la barra.
 //!
 //! La accion se encola (AppState::request) en vez de ejecutarse aca: el
 //! callback corre dentro de WebView2, y por ejemplo cerrar la pestana desde
@@ -28,6 +35,11 @@ const VK_TAB: u32 = 0x09;
 const VK_PRIOR: u32 = 0x21; // Re Pag
 const VK_NEXT: u32 = 0x22; // Av Pag
 const VK_ESCAPE: u32 = 0x1B;
+const VK_OEM_PLUS: u32 = 0xBB; // '+' (y '=' en el teclado de EE. UU.)
+const VK_OEM_MINUS: u32 = 0xBD;
+const VK_ADD: u32 = 0x6B; // '+' del teclado numerico
+const VK_SUBTRACT: u32 = 0x6D;
+const VK_NUMPAD0: u32 = 0x60;
 
 /// Engancha los atajos a un WebView (cada pestana y cada pieza de la interfaz).
 /// `chrome`: es la barra o un panel lateral (ver restore_focus).
@@ -105,6 +117,14 @@ pub fn handle_winit_key(state: &Shared, event: &winit::event::KeyEvent, mods: wi
         return;
     }
     let PhysicalKey::Code(code) = event.physical_key else { return };
+    let logical = match &event.logical_key {
+        winit::keyboard::Key::Character(c) => Some(c.as_str()),
+        _ => None,
+    };
+    if let Some(vk) = zoom_vk(logical, code) {
+        handle_key(state, vk, mods.control_key(), mods.shift_key(), mods.alt_key());
+        return;
+    }
     let letters = [
         KeyCode::KeyA, KeyCode::KeyB, KeyCode::KeyC, KeyCode::KeyD, KeyCode::KeyE, KeyCode::KeyF,
         KeyCode::KeyG, KeyCode::KeyH, KeyCode::KeyI, KeyCode::KeyJ, KeyCode::KeyK, KeyCode::KeyL,
@@ -132,6 +152,23 @@ pub fn handle_winit_key(state: &Shared, event: &winit::event::KeyEvent, mods: wi
         },
     };
     handle_key(state, vk, mods.control_key(), mods.shift_key(), mods.alt_key());
+}
+
+/// La tecla virtual de zoom que corresponde a una tecla de winit. El '+' y el
+/// '-' se miran por el caracter (logical_key no cambia con Ctrl) y no por la
+/// posicion fisica: en el teclado espanol el '+' esta donde en el de EE. UU.
+/// va el ']'.
+fn zoom_vk(logical: Option<&str>, code: winit::keyboard::KeyCode) -> Option<u32> {
+    use winit::keyboard::KeyCode;
+    match (logical, code) {
+        (_, KeyCode::NumpadAdd) => Some(VK_ADD),
+        (_, KeyCode::NumpadSubtract) => Some(VK_SUBTRACT),
+        (_, KeyCode::Numpad0) => Some(VK_NUMPAD0),
+        (_, KeyCode::Digit0) => Some(b'0' as u32),
+        (Some("+") | Some("="), _) => Some(VK_OEM_PLUS),
+        (Some("-"), _) => Some(VK_OEM_MINUS),
+        _ => None,
+    }
 }
 
 /// Si la tecla (con los modificadores apretados ahora) es un atajo, encola
@@ -204,6 +241,11 @@ fn map(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Mapped> {
         (true, false, false, Some('H'), _) | (true, false, false, Some('J'), _) => A(Action::ShowLibrary),
         (true, true, false, Some('O'), _) => A(Action::ShowLibrary),
         (false, false, true, Some('F'), _) => A(Action::ToggleMenu),
+        // Zoom: Ctrl + '+'/'-' (con o sin Mayus: en el teclado de EE. UU. el
+        // '+' es Mayus + '='), Ctrl + '0' vuelve al predeterminado.
+        (true, _, false, _, VK_OEM_PLUS | VK_ADD) => A(Action::Zoom(1)),
+        (true, _, false, _, VK_OEM_MINUS | VK_SUBTRACT) => A(Action::Zoom(-1)),
+        (true, false, false, Some('0'), _) | (true, false, false, _, VK_NUMPAD0) => A(Action::Zoom(0)),
         _ => return None,
     })
 }
@@ -247,7 +289,53 @@ mod tests {
         assert_eq!(tab_target(b'1' as u32, false, false, false), None);
         assert_eq!(tab_target(b'1' as u32, true, true, false), None);
         assert_eq!(tab_target(b'1' as u32, true, false, true), None);
-        // Ctrl+0 es el zoom de WebView2: no se toca.
+        // Ctrl+0 es el zoom, no una pestana.
         assert_eq!(tab_target(b'0' as u32, true, false, false), None);
+    }
+
+    fn zoom_step(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<i32> {
+        match map(vk, ctrl, shift, alt) {
+            Some(Mapped::Action(Action::Zoom(n))) => Some(n),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn ctrl_plus_minus_and_zero_zoom() {
+        for vk in [VK_OEM_PLUS, VK_ADD] {
+            assert_eq!(zoom_step(vk, true, false, false), Some(1));
+            assert_eq!(zoom_step(vk, true, true, false), Some(1));
+        }
+        for vk in [VK_OEM_MINUS, VK_SUBTRACT] {
+            assert_eq!(zoom_step(vk, true, false, false), Some(-1));
+            assert_eq!(zoom_step(vk, true, true, false), Some(-1));
+        }
+        assert_eq!(zoom_step(b'0' as u32, true, false, false), Some(0));
+        assert_eq!(zoom_step(VK_NUMPAD0, true, false, false), Some(0));
+    }
+
+    #[test]
+    fn zoom_keys_need_ctrl_and_no_alt() {
+        // Sin Ctrl el '+' y el '-' son de la pagina (escribir); con Alt
+        // (AltGr = Ctrl+Alt) tampoco son zoom.
+        for vk in [VK_OEM_PLUS, VK_ADD, VK_OEM_MINUS, VK_SUBTRACT, b'0' as u32, VK_NUMPAD0] {
+            assert_eq!(zoom_step(vk, false, false, false), None);
+            assert_eq!(zoom_step(vk, true, false, true), None);
+        }
+        assert_eq!(zoom_step(b'0' as u32, true, true, false), None);
+    }
+
+    #[test]
+    fn winit_zoom_keys_follow_the_character_not_the_position() {
+        use winit::keyboard::KeyCode;
+        // Teclado espanol: el '+' esta en la posicion del ']' de EE. UU.
+        assert_eq!(zoom_vk(Some("+"), KeyCode::BracketRight), Some(VK_OEM_PLUS));
+        assert_eq!(zoom_vk(Some("="), KeyCode::Equal), Some(VK_OEM_PLUS));
+        assert_eq!(zoom_vk(Some("-"), KeyCode::Slash), Some(VK_OEM_MINUS));
+        assert_eq!(zoom_vk(None, KeyCode::NumpadAdd), Some(VK_ADD));
+        assert_eq!(zoom_vk(None, KeyCode::NumpadSubtract), Some(VK_SUBTRACT));
+        assert_eq!(zoom_vk(Some("0"), KeyCode::Digit0), Some(b'0' as u32));
+        assert_eq!(zoom_vk(None, KeyCode::Numpad0), Some(VK_NUMPAD0));
+        assert_eq!(zoom_vk(Some("]"), KeyCode::BracketRight), None);
     }
 }

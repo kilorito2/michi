@@ -96,18 +96,15 @@ fn run(state: &Shared, action: Action) {
             }
         }
         Action::Zoom(step) => {
-            let (id, target) = {
+            // El controlador y no el WebView: el prestamo se suelta antes de
+            // cambiar el zoom (ver zoom::apply).
+            let (id, target, controller) = {
                 let st = state.borrow();
                 let Some(t) = st.active_tab() else { return };
-                let current = native::zoom(&t.webview);
-                let target = match step {
-                    0 => st.settings.default_zoom,
-                    s if s > 0 => ZOOM_STEPS.iter().copied().find(|z| *z > current + 0.001).unwrap_or(5.0),
-                    _ => ZOOM_STEPS.iter().rev().copied().find(|z| *z < current - 0.001).unwrap_or(0.25),
-                };
-                let _ = t.webview.zoom(target);
-                (t.id, target)
+                let target = zoom_target(native::zoom(&t.webview), step, st.settings.default_zoom);
+                (t.id, target, t.webview.controller())
             };
+            let _ = unsafe { controller.SetZoomFactor(target) };
             // Queda recordado para el sitio (ver zoom.rs).
             crate::zoom::remember(state, id, target);
             sync::push_menu(state);
@@ -127,6 +124,16 @@ fn run(state: &Shared, action: Action) {
         Action::CloseTab(id) => tabs::close_tab(state, id),
         Action::Fullscreen(id, on) => fullscreen::set(state, id, on),
         Action::Shutdown => crate::security::shutdown(state),
+    }
+}
+
+/// El zoom que sigue a `current` un paso para arriba (`step` > 0), para
+/// abajo (< 0) o el predeterminado (0).
+fn zoom_target(current: f64, step: i32, default: f64) -> f64 {
+    match step {
+        0 => default,
+        s if s > 0 => ZOOM_STEPS.iter().copied().find(|z| *z > current + 0.001).unwrap_or(5.0),
+        _ => ZOOM_STEPS.iter().rev().copied().find(|z| *z < current - 0.001).unwrap_or(0.25),
     }
 }
 
@@ -174,4 +181,21 @@ fn open_settings(state: &Shared, section: &str) {
         }
     }
     layout::relayout(state);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zoom_moves_one_step_and_stays_in_range() {
+        assert_eq!(zoom_target(1.0, 1, 1.0), 1.1);
+        assert_eq!(zoom_target(1.0, -1, 1.0), 0.9);
+        // Un zoom entre pasos (Ctrl + rueda) salta al paso siguiente.
+        assert_eq!(zoom_target(1.05, 1, 1.0), 1.1);
+        assert_eq!(zoom_target(1.05, -1, 1.0), 1.0);
+        assert_eq!(zoom_target(5.0, 1, 1.0), 5.0);
+        assert_eq!(zoom_target(0.25, -1, 1.0), 0.25);
+        assert_eq!(zoom_target(2.0, 0, 1.25), 1.25);
+    }
 }
