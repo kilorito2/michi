@@ -279,18 +279,60 @@ impl Staged {
     /// La pone en `dest` (reemplazando lo que hubiera) y devuelve su raiz.
     fn commit(self, dest: &Path) -> Result<PathBuf, String> {
         let rel = self.root.strip_prefix(&self.dir).map(Path::to_path_buf).unwrap_or_default();
-        let _ = std::fs::remove_dir_all(dest);
-        // El antivirus suele tener abiertos un momento los archivos recien
-        // escritos, y mientras tanto la carpeta no se puede mover.
-        let mut attempt = 0;
-        while let Err(err) = std::fs::rename(&self.dir, dest) {
-            attempt += 1;
-            if attempt == 20 {
-                return Err(err.to_string());
-            }
-            std::thread::sleep(Duration::from_millis(150));
-        }
+        replace_dir(&self.dir, dest, 20, Duration::from_millis(150))?;
         Ok(dest.join(rel))
+    }
+}
+
+/// Prefijo de la carpeta donde queda un momento la version instalada mientras
+/// se pone la nueva (ver replace_dir y clean_staging).
+const OLD_PREFIX: &str = ".vieja-";
+
+/// Pone la carpeta `new` en lugar de `dest` sin quedarse nunca sin ninguna:
+/// la instalada se aparta primero (".vieja-<fecha>-<nombre>"), entra la nueva
+/// y recien ahi se borra la vieja; si la nueva no se pudo poner, la vieja
+/// vuelve a su lugar. Antes se borraba la instalada primero, y si despues el
+/// rename fallaba (el antivirus con un archivo abierto) no quedaba ninguna.
+/// Reintenta `attempts` veces: el antivirus suele tener abiertos un momento
+/// los archivos recien escritos, y WebView2 los de la extension en uso.
+fn replace_dir(new: &Path, dest: &Path, attempts: u32, wait: Duration) -> Result<(), String> {
+    let retry = |from: &Path, to: &Path| {
+        let mut attempt = 0;
+        loop {
+            match std::fs::rename(from, to) {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    attempt += 1;
+                    if attempt >= attempts {
+                        return Err(err.to_string());
+                    }
+                    std::thread::sleep(wait);
+                }
+            }
+        }
+    };
+    let old = match (dest.exists(), dest.parent(), dest.file_name()) {
+        (true, Some(parent), Some(name)) => {
+            let old = parent.join(format!("{OLD_PREFIX}{}-{}", unix_millis(), name.to_string_lossy()));
+            // Si la instalada no se puede apartar, queda como estaba.
+            retry(dest, &old).map_err(|e| format!("No se pudo reemplazar la versión instalada ({e})."))?;
+            Some(old)
+        }
+        _ => None,
+    };
+    match retry(new, dest) {
+        Ok(()) => {
+            if let Some(old) = old {
+                let _ = std::fs::remove_dir_all(old);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            if let Some(old) = old {
+                let _ = std::fs::rename(&old, dest);
+            }
+            Err(e)
+        }
     }
 }
 
@@ -303,10 +345,25 @@ impl Drop for Staged {
 /// Carpetas temporales de instalaciones que no terminaron (el navegador se
 /// cerro con la confirmacion abierta): al arrancar no hay ninguna en curso.
 pub fn clean_staging() {
-    let Ok(entries) = std::fs::read_dir(extensions_dir()) else { return };
+    clean_staging_in(&extensions_dir());
+}
+
+/// clean_staging en `dir`. Una ".vieja-" que quedo (Michi se cerro en medio
+/// de replace_dir) vuelve a su lugar si la nueva no llego a entrar; si
+/// entro, se borra.
+fn clean_staging_in(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
-        if entry.file_name().to_string_lossy().starts_with(".nueva-") {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(".nueva-") {
             let _ = std::fs::remove_dir_all(entry.path());
+        } else if let Some(original) = name.strip_prefix(OLD_PREFIX).and_then(|rest| rest.split_once('-')).map(|(_, n)| n) {
+            let dest = dir.join(original);
+            if original.is_empty() || dest.exists() {
+                let _ = std::fs::remove_dir_all(entry.path());
+            } else {
+                let _ = std::fs::rename(entry.path(), dest);
+            }
         }
     }
 }
@@ -844,6 +901,42 @@ mod tests {
         assert!(version_parts("2.0") > version_parts("1.99.99.99"));
         assert!(version_parts("1.2") < version_parts("1.2.1"));
         assert_eq!(version_parts("1.2.3"), version_parts("1.2.3"));
+    }
+
+    #[test]
+    fn reinstalling_never_leaves_the_extension_without_a_version() {
+        let base = std::env::temp_dir().join(format!("michi-prueba-ext-{}-{}", std::process::id(), unix_millis()));
+        let (dest, new) = (base.join("abc"), base.join(".nueva-1"));
+        let version = |d: &Path| std::fs::read_to_string(d.join("manifest.json")).ok();
+        let leftovers = || std::fs::read_dir(&base).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with(OLD_PREFIX)).count();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("manifest.json"), "1").unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(new.join("manifest.json"), "2").unwrap();
+
+        // Reemplazo normal: queda la nueva y no queda la vieja apartada.
+        replace_dir(&new, &dest, 3, Duration::from_millis(1)).unwrap();
+        assert_eq!(version(&dest).as_deref(), Some("2"));
+        assert!(!new.exists());
+        assert_eq!(leftovers(), 0);
+
+        // La nueva no se puede poner: la instalada vuelve a su lugar.
+        assert!(replace_dir(&base.join(".nueva-no-existe"), &dest, 3, Duration::from_millis(1)).is_err());
+        assert_eq!(version(&dest).as_deref(), Some("2"));
+        assert_eq!(leftovers(), 0);
+
+        // Michi se cerro con la instalada apartada y sin la nueva: vuelve.
+        std::fs::rename(&dest, base.join(format!("{OLD_PREFIX}5-abc"))).unwrap();
+        // Y una apartada cuya nueva si llego se borra.
+        std::fs::create_dir_all(base.join("local-7")).unwrap();
+        std::fs::create_dir_all(base.join(format!("{OLD_PREFIX}6-local-7"))).unwrap();
+        std::fs::create_dir_all(base.join(".nueva-9")).unwrap();
+        clean_staging_in(&base);
+        assert_eq!(version(&dest).as_deref(), Some("2"));
+        assert!(base.join("local-7").exists());
+        assert_eq!(leftovers(), 0);
+        assert!(!base.join(".nueva-9").exists());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

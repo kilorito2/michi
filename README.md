@@ -894,6 +894,9 @@ respondía a CSS, así que se optó por un color sólido.
   directamente). Ver la nota de la sección [Instalador](#instalador).
 - **Extensiones sin popup** (las que hacen algo directo al tocar su icono) no
   aparecen en la barra: WebView2 no permite disparar ese evento desde afuera.
+- **Las extensiones no se actualizan solas**: para tener la versión nueva de
+  una extensión de la tienda, vuelve a tocar **Agregar a Michi** en su página
+  (se reemplaza la instalada y nunca por una más vieja).
 - **SmartScreen depende de Windows**: si *SmartScreen para Microsoft Edge* está
   apagado en Seguridad de Windows, WebView2 no lo usa.
 - **Mezcladores de audio de terceros** (SteelSeries Sonar y similares) pueden
