@@ -666,11 +666,8 @@ impl AppState {
         if s.favicons.replace(false) && keep {
             storage::save_in_background(storage::FAVICONS_FILE, &self.suggest.favicons);
         }
-        // Restaurando la sesion anterior (ver tabs::restore_next) no: se
-        // guardaria a medias, y si Michi se cayera ahi se perderian las que
-        // faltan. Queda pendiente y sale al terminar.
-        if s.session.get() && keep && self.restore_queue.is_empty() {
-            s.session.set(false);
+        // Tambien a mitad de la restauracion: session() incluye las que faltan.
+        if s.session.replace(false) && keep {
             storage::save_in_background(storage::SESSION_FILE, &self.session());
         }
     }
@@ -693,17 +690,29 @@ impl AppState {
 
     /// Las pestanas abiertas, como se guardan (ver save_session).
     fn session(&self) -> storage::Session {
-        let normal = || self.tabs.iter().filter(|t| !t.incognito);
-        let urls: Vec<String> = normal().map(|t| t.real_url().to_string()).collect();
+        let rows: Vec<SessionRow> = self
+            .tabs
+            .iter()
+            .filter(|t| !t.incognito)
+            .map(|t| SessionRow {
+                index: self.restore_index.get(&t.id).copied(),
+                url: t.real_url().to_string(),
+                pinned: t.pinned,
+                group: t.group,
+            })
+            .collect();
         // Cuantas pestanas normales hay antes de la activa (si la activa es de
         // incognito, queda la normal que sigue, o la ultima).
         let before = self.tabs.iter().take(self.active).filter(|t| !t.incognito).count();
+        let (rows, before) = merge_restore_queue(rows, before, &self.restore_queue);
+        let urls: Vec<String> = rows.iter().map(|r| r.url.clone()).collect();
         // Las fijadas van primero: alcanza con cuantas son.
-        let pinned = normal().filter(|t| t.pinned).count();
+        let pinned = rows.iter().filter(|r| r.pinned).count();
         // Los grupos que tienen alguna pestana normal, y a cual va cada una.
         let mut groups: Vec<storage::SavedGroup> = Vec::new();
         let mut index_of: Vec<u64> = Vec::new();
-        let tab_groups = normal()
+        let tab_groups = rows
+            .iter()
             .map(|t| {
                 let g = self.groups.iter().find(|g| Some(g.id) == t.group)?;
                 let i = index_of.iter().position(|id| *id == g.id).unwrap_or_else(|| {
@@ -731,6 +740,42 @@ impl AppState {
 }
 
 pub type Shared = Rc<RefCell<AppState>>;
+
+/// Una pestana tal como se guarda en la sesion (ver AppState::session).
+#[derive(Debug, Clone, PartialEq)]
+struct SessionRow {
+    /// Su posicion en la sesion anterior, si es una restaurada.
+    index: Option<usize>,
+    url: String,
+    pinned: bool,
+    group: Option<u64>,
+}
+
+/// Las pestanas abiertas mas las de la sesion anterior que todavia no se
+/// crearon (ver tabs::restore_next), cada una en su lugar. Sin esto, cerrar
+/// Michi a mitad de la restauracion guardaba solo las ya creadas: las demas
+/// se perdian. `active`: la posicion de la activa en `rows`; devuelve la
+/// nueva.
+fn merge_restore_queue(mut rows: Vec<SessionRow>, active: usize, queue: &[RestoreTab]) -> (Vec<SessionRow>, usize) {
+    let mut active = active;
+    for entry in queue {
+        let existing: Vec<(Option<usize>, bool)> = rows.iter().map(|r| (r.index, r.pinned)).collect();
+        let at = crate::tabs::restore_position(&existing, entry.index, entry.pinned);
+        if at <= active && !rows.is_empty() {
+            active += 1;
+        }
+        rows.insert(
+            at,
+            SessionRow {
+                index: Some(entry.index),
+                url: entry.url.clone(),
+                pinned: entry.pinned,
+                group: if entry.pinned { None } else { entry.group },
+            },
+        );
+    }
+    (rows, active)
+}
 
 /// Cada cuanto, como mucho, se escriben el historial, la sesion y los logos.
 pub const SAVE_EVERY: Duration = Duration::from_secs(5);
@@ -789,6 +834,22 @@ mod tests {
         st.flush_saves();
         assert!(storage::wait_writes(storage::WRITE_WAIT));
         assert!(file.exists());
+    }
+
+    #[test]
+    fn closing_mid_restore_keeps_the_tabs_still_waiting() {
+        let row = |index: Option<usize>, url: &str, pinned: bool| SessionRow { index, url: url.into(), pinned, group: None };
+        let queue = |index: usize, url: &str, pinned: bool, group: Option<u64>| RestoreTab { index, url: url.into(), pinned, group };
+        // Ya estan la 0 (fijada) y la 3 (activa) y una nueva del usuario; faltan la 1 y la 2.
+        let rows = vec![row(Some(0), "a", true), row(Some(3), "d", false), row(None, "nueva", false)];
+        let (merged, active) = merge_restore_queue(rows, 1, &[queue(1, "b", true, None), queue(2, "c", false, Some(9))]);
+        let urls: Vec<&str> = merged.iter().map(|r| r.url.as_str()).collect();
+        assert_eq!(urls, vec!["a", "b", "c", "d", "nueva"]);
+        assert_eq!(merged[active].url, "d");
+        assert_eq!(merged[2].group, Some(9));
+        // Sin nada pendiente, igual que antes.
+        let (same, active) = merge_restore_queue(vec![row(None, "x", false)], 0, &[]);
+        assert_eq!((same.len(), active), (1, 0));
     }
 
     #[test]
