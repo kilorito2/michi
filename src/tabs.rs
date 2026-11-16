@@ -6,7 +6,10 @@ use wry::dpi::{LogicalPosition, LogicalSize};
 use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2Environment};
 use wry::{PageLoadEvent, Rect, WebViewBuilderExtWindows, WebViewExtWindows};
 
-use crate::state::{is_own_page, own_page_path, HistoryEntry, PendingTab, PendingWindow, Shared, Tab, EDGE_IDLE, HOME_URL, TOPBAR_H};
+use crate::state::{
+    is_own_page, own_page_path, HistoryEntry, PendingTab, PendingWindow, RestoreTab, Shared, Tab, EDGE_IDLE, HOME_URL,
+    TOPBAR_H,
+};
 use crate::storage::HISTORY_MAX;
 use crate::{downloads, layout, permissions, security, shortcuts, sync};
 
@@ -38,6 +41,90 @@ pub fn open_pending(state: &Shared, p: PendingTab) {
             crate::groups::add_to(state, id, group);
         }
     }
+}
+
+/// Crea una pestana de la sesion anterior y la pone en su lugar, con su
+/// fijada y su grupo. `front`: es la que estaba activa (la primera que se
+/// crea); las demas nacen atras, sin pasar al frente ni robar el foco.
+/// Devuelve si se pudo crear: si una falla, las demas igual quedan con lo
+/// suyo (cada una trae su fijada y su grupo, no "las primeras N").
+pub fn restore(state: &Shared, entry: RestoreTab, front: bool) -> bool {
+    if create_tab(state, &entry.url, None, false, !front).is_none() {
+        return false;
+    }
+    {
+        let mut st = state.borrow_mut();
+        let st = &mut *st;
+        // La recien creada: los ids crecen, es la de id mas alto.
+        let Some(from) = st.tabs.iter().enumerate().max_by_key(|(_, t)| t.id).map(|(i, _)| i) else { return false };
+        let active_id = st.active_tab().map(|t| t.id);
+        let mut tab = st.tabs.remove(from);
+        tab.pinned = entry.pinned;
+        tab.group = if entry.pinned { None } else { entry.group };
+        st.restore_index.insert(tab.id, entry.index);
+        let existing: Vec<(Option<usize>, bool)> =
+            st.tabs.iter().map(|t| (st.restore_index.get(&t.id).copied(), t.pinned)).collect();
+        let at = restore_position(&existing, entry.index, entry.pinned);
+        let id = tab.id;
+        st.tabs.insert(at, tab);
+        st.background_chain = None;
+        let keep = if front { Some(id) } else { active_id };
+        crate::groups::normalize(st);
+        if let Some(i) = keep.and_then(|a| st.tabs.iter().position(|t| t.id == a)) {
+            st.active = i;
+        }
+        if front {
+            crate::groups::reveal_active(st);
+        }
+    }
+    layout::relayout(state);
+    sync::push_tabs(state);
+    true
+}
+
+/// Donde va una pestana restaurada con posicion `index` en la sesion, entre
+/// las que ya hay (`existing`: la posicion en la sesion de cada una, o None
+/// si la abrio el usuario mientras tanto, y si esta fijada): antes de la
+/// primera que iba despues; si no hay, despues de la ultima restaurada (las
+/// nuevas del usuario quedan al final). Las fijadas siempre primero.
+pub fn restore_position(existing: &[(Option<usize>, bool)], index: usize, pinned: bool) -> usize {
+    let at = existing
+        .iter()
+        .position(|(i, _)| i.is_some_and(|i| i > index))
+        .or_else(|| existing.iter().rposition(|(i, _)| i.is_some()).map(|p| p + 1))
+        .unwrap_or(if pinned { 0 } else { existing.len() });
+    let pinned_count = existing.iter().take_while(|(_, p)| *p).count();
+    if pinned {
+        at.min(pinned_count)
+    } else {
+        at.max(pinned_count)
+    }
+}
+
+/// Una vuelta del bucle de eventos: crea la proxima pestana de la sesion
+/// anterior (ver main::open_startup_tabs). Crear un WebView bloquea el hilo
+/// ~100-150ms, y crearlas todas al arrancar congelaba la ventana unos
+/// segundos con muchas pestanas. Devuelve si quedan mas.
+pub fn restore_next(state: &Shared) -> bool {
+    loop {
+        let next = {
+            let mut st = state.borrow_mut();
+            (!st.restore_queue.is_empty()).then(|| st.restore_queue.remove(0))
+        };
+        let Some(entry) = next else { break };
+        if restore(state, entry, false) {
+            break;
+        }
+    }
+    let done = state.borrow().restore_queue.is_empty();
+    if done {
+        let mut st = state.borrow_mut();
+        st.restore_index.clear();
+        // Las que no se pudieron crear se llevaron su grupo, si quedo vacio.
+        crate::groups::normalize(&mut st);
+        st.save_session();
+    }
+    !done
 }
 
 /// window.open() de una pagina (ver state::PendingWindow): la pestana nace
@@ -544,5 +631,28 @@ pub fn reload(state: &Shared, id: u64) {
     };
     if crashed {
         crate::recovery::reload_crashed(state, id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restored_tabs_land_in_their_saved_place() {
+        // Ya estan la 0 (fijada) y la 3; llega la 2: entre las dos.
+        let have = [(Some(0), true), (Some(3), false)];
+        assert_eq!(restore_position(&have, 2, false), 1);
+        // La 5: al final de las restauradas.
+        assert_eq!(restore_position(&have, 5, false), 2);
+        // Una fijada (la 1) nunca despues de una sin fijar.
+        assert_eq!(restore_position(&have, 1, true), 1);
+        assert_eq!(restore_position(&[(Some(3), false)], 1, true), 0);
+        // Una que abrio el usuario mientras tanto queda al final.
+        let with_user = [(Some(0), false), (None, false)];
+        assert_eq!(restore_position(&with_user, 4, false), 1);
+        // La primera de todas.
+        assert_eq!(restore_position(&[], 7, false), 0);
+        assert_eq!(restore_position(&[(None, false)], 7, false), 1);
     }
 }

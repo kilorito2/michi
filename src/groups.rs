@@ -57,7 +57,9 @@ pub fn normalize(st: &mut AppState) {
     if let Some(i) = active_id.and_then(|a| st.tabs.iter().position(|t| t.id == a)) {
         st.active = i;
     }
-    let used: Vec<u64> = st.tabs.iter().filter_map(|t| t.group).collect();
+    // Tambien los de las pestanas que todavia se estan restaurando (ver
+    // tabs::restore_next): su grupo existe aunque aun no tenga ninguna.
+    let used: Vec<u64> = st.tabs.iter().filter_map(|t| t.group).chain(st.restore_queue.iter().filter_map(|r| r.group)).collect();
     st.groups.retain(|g| used.contains(&g.id));
 }
 
@@ -220,12 +222,12 @@ pub fn close(state: &Shared, group: u64) {
     }
 }
 
-/// Al restaurar la sesion: arma los grupos guardados y les pone sus pestanas
-/// (`tab_ids` en el orden de `session.urls`).
-pub fn restore(state: &Shared, session: &crate::storage::Session, tab_ids: &[u64]) {
+/// Al restaurar la sesion: arma los grupos guardados y devuelve sus ids (en
+/// el orden de `session.groups`). Las pestanas entran despues, de a una (ver
+/// tabs::restore_next).
+pub fn create_saved(state: &Shared, saved: &[crate::storage::SavedGroup]) -> Vec<u64> {
     let mut st = state.borrow_mut();
-    let ids: Vec<u64> = session
-        .groups
+    saved
         .iter()
         .map(|g| {
             let id = st.alloc_id();
@@ -233,15 +235,7 @@ pub fn restore(state: &Shared, session: &crate::storage::Session, tab_ids: &[u64
             st.groups.push(TabGroup { id, name: group_name(&g.name), color, collapsed: g.collapsed });
             id
         })
-        .collect();
-    for (tab_id, group) in tab_ids.iter().zip(&session.tab_groups) {
-        let group = group.and_then(|i| ids.get(i).copied());
-        if let Some(t) = st.tabs.iter_mut().find(|t| t.id == *tab_id) {
-            t.group = group;
-        }
-    }
-    normalize(&mut st);
-    reveal_active(&mut st);
+        .collect()
 }
 
 #[cfg(test)]

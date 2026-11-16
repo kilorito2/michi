@@ -49,7 +49,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
-use state::{AppState, Shared, UserEvent, HOME_URL, MIN_WINDOW_H, MIN_WINDOW_W};
+use state::{AppState, RestoreTab, Shared, UserEvent, HOME_URL, MIN_WINDOW_H, MIN_WINDOW_W};
 
 struct App {
     state: Shared,
@@ -214,6 +214,15 @@ impl ApplicationHandler<UserEvent> for App {
                 self.state.borrow().wake();
             }
         }
+        // Las de la sesion anterior que faltan, de a una y despues de lo que
+        // pidio el usuario (ver tabs::restore_next).
+        let restoring = {
+            let st = self.state.borrow();
+            !st.restore_queue.is_empty() && st.pending_tabs.is_empty() && st.pending_windows.is_empty()
+        };
+        if restoring && tabs::restore_next(&self.state) {
+            self.state.borrow().wake();
+        }
         // Intentos por HTTPS demorados (ver security::tick): antes de las
         // acciones, asi su vuelta a HTTP sale en esta misma pasada.
         let https = security::tick(&self.state);
@@ -300,23 +309,36 @@ fn open_startup_tabs(state: &Shared) {
         tabs::open_tab(state, requested.as_deref().unwrap_or(HOME_URL), false);
         return;
     }
-    let mut ids = Vec::new();
-    for (i, url) in session.urls.iter().enumerate() {
-        tabs::open_tab(state, url, false);
-        if let Some(tab) = state.borrow_mut().tabs.last_mut() {
-            tab.pinned = i < session.pinned;
-            ids.push(tab.id);
+    // Ahora solo la que estaba al frente; las demas, de a una por vuelta del
+    // bucle de eventos (ver tabs::restore_next y about_to_wait), cada una con
+    // su fijada y su grupo.
+    let group_ids = groups::create_saved(state, &session.groups);
+    let mut queue: Vec<RestoreTab> = session
+        .urls
+        .iter()
+        .enumerate()
+        .map(|(i, url)| RestoreTab {
+            index: i,
+            url: url.clone(),
+            pinned: i < session.pinned,
+            group: session.tab_groups.get(i).copied().flatten().and_then(|g| group_ids.get(g).copied()),
+        })
+        .collect();
+    let mut first = Some(queue.remove(session.active.min(queue.len() - 1)));
+    state.borrow_mut().restore_queue = queue;
+    // Si la del frente no se pudo crear, la siguiente pasa al frente.
+    while let Some(entry) = first.take() {
+        if !tabs::restore(state, entry, true) {
+            let mut st = state.borrow_mut();
+            first = (!st.restore_queue.is_empty()).then(|| st.restore_queue.remove(0));
         }
     }
-    groups::restore(state, &session, &ids);
     // Lo pedido al abrir (un enlace de otra aplicacion) queda al frente.
     if let Some(url) = requested {
         tabs::open_tab(state, &url, false);
-        return;
+    } else if state.borrow().tabs.is_empty() {
+        tabs::open_tab(state, HOME_URL, false);
     }
-    let last = session.urls.len() - 1;
-    state.borrow_mut().active = session.active.min(last);
-    tabs::activated(state);
 }
 
 /// Direccion o archivo pasado al abrir el navegador: es lo que hace Windows

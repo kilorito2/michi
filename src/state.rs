@@ -244,6 +244,17 @@ pub enum Action {
     Shutdown,
 }
 
+/// Una pestana de la sesion anterior esperando su turno (ver tabs::restore_next).
+#[derive(Debug, Clone)]
+pub struct RestoreTab {
+    /// Posicion en la sesion guardada.
+    pub index: usize,
+    pub url: String,
+    pub pinned: bool,
+    /// Id del grupo (ya creado, ver groups::create_saved).
+    pub group: Option<u64>,
+}
+
 /// Una pestana pedida, esperando su vuelta del bucle (ver AppState::request_tab).
 #[derive(Debug, Clone)]
 pub struct PendingTab {
@@ -449,6 +460,12 @@ pub struct AppState {
     pub assistant_until: Option<Instant>,
     /// Lo que hay que escribir en el disco (ver AppState::flush_saves).
     saves: PendingSaves,
+    /// Pestanas de la sesion anterior que todavia no se crearon (ver
+    /// tabs::restore_next), en orden.
+    pub restore_queue: Vec<RestoreTab>,
+    /// Posicion en la sesion guardada de cada pestana ya restaurada (por id),
+    /// para ubicar las que faltan entre ellas. Se vacia al terminar.
+    pub restore_index: HashMap<u64, usize>,
 
     next_id: u64,
 }
@@ -506,6 +523,8 @@ impl AppState {
             assistant_asking: false,
             assistant_until: None,
             saves: PendingSaves::default(),
+            restore_queue: Vec::new(),
+            restore_index: HashMap::new(),
 
             next_id: 1,
         }
@@ -641,7 +660,11 @@ impl AppState {
         if s.favicons.replace(false) && keep {
             storage::save_in_background(storage::FAVICONS_FILE, &self.suggest.favicons);
         }
-        if s.session.replace(false) && keep {
+        // Restaurando la sesion anterior (ver tabs::restore_next) no: se
+        // guardaria a medias, y si Michi se cayera ahi se perderian las que
+        // faltan. Queda pendiente y sale al terminar.
+        if s.session.get() && keep && self.restore_queue.is_empty() {
+            s.session.set(false);
             storage::save_in_background(storage::SESSION_FILE, &self.session());
         }
     }
