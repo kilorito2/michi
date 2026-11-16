@@ -112,6 +112,9 @@ pub struct Tab {
     pub group: Option<u64>,
     /// "Guardar la contrasena?" esperando respuesta (ver passwords.rs).
     pub password_offer: Option<crate::passwords::Offer>,
+    /// Ultimo aviso de "se envio una contrasena" de la pagina (ver
+    /// passwords::capture_allowed).
+    pub password_capture_at: Option<Instant>,
     /// La abrio May por el pipe de control (ver control.rs): si es de
     /// incognito, May la puede leer; las de incognito del usuario, no.
     pub assistant: bool,

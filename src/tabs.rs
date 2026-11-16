@@ -243,6 +243,7 @@ fn create_tab(
         muted: false,
         group: None,
         password_offer: None,
+        password_capture_at: None,
         assistant: false,
     };
     {

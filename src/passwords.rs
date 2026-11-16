@@ -40,6 +40,8 @@ const VERIFIED_FOR: Duration = Duration::from_secs(120);
 const OFFER_FOR: Duration = Duration::from_secs(180);
 /// Lo copiado al portapapeles se borra a los...
 const CLIPBOARD_FOR: Duration = Duration::from_secs(30);
+/// Como mucho un aviso de "se envio una contrasena" por pestana cada...
+const CAPTURE_EVERY: Duration = Duration::from_secs(3);
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
@@ -168,6 +170,17 @@ struct Captured {
 /// Una pagina envio un formulario con contrasena (ver ui/content_init.js).
 /// `source` es la URL real del documento que lo mando (la pone WebView2).
 pub fn on_captured(state: &Shared, tab_id: u64, source: &str, raw: &str) {
+    // Cualquier pagina puede mandar "michi:pw:" las veces que quiera: sin un
+    // tope, podia tapar la barra con preguntas de "Guardar la contrasena?".
+    {
+        let mut st = state.borrow_mut();
+        let Some(tab) = st.tabs.iter_mut().find(|t| t.id == tab_id) else { return };
+        let now = Instant::now();
+        if !capture_allowed(tab.password_capture_at, now) {
+            return;
+        }
+        tab.password_capture_at = Some(now);
+    }
     let Ok(c) = serde_json::from_str::<Captured>(raw) else { return };
     let (username, password) = (c.u.trim().to_string(), c.p);
     if password.is_empty() || password.len() > 512 || username.len() > 256 {
@@ -197,6 +210,12 @@ pub fn on_captured(state: &Shared, tab_id: u64, source: &str, raw: &str) {
     if changed {
         sync::push_active_tab(state);
     }
+}
+
+/// Si se atiende el aviso de una pagina que envio una contrasena, segun el
+/// anterior de esa pestana (ver CAPTURE_EVERY).
+fn capture_allowed(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|at| now.saturating_duration_since(at) >= CAPTURE_EVERY)
 }
 
 /// Lo que muestra la barra para la oferta de la pestana activa.
@@ -297,12 +316,17 @@ fn fill(state: &Shared, tab_id: u64, id: u64) {
         let mut st = state.borrow_mut();
         let Some(entry) = st.passwords.store.entries.iter_mut().find(|e| e.id == id) else { return };
         let (origin, username, secret) = (entry.origin.clone(), entry.username.clone(), entry.secret.clone());
-        let same_site = st.tabs.iter().find(|t| t.id == tab_id).and_then(|t| security::origin_of(&t.url)).as_deref() == Some(origin.as_str());
+        let tab = st.tabs.iter().find(|t| t.id == tab_id);
+        let same_site = tab.and_then(|t| security::origin_of(&t.url)).as_deref() == Some(origin.as_str());
+        let incognito = tab.is_some_and(|t| t.incognito);
         let Some(password) = same_site.then(|| unprotect(&secret)).flatten() else { return };
-        if let Some(e) = st.passwords.store.entries.iter_mut().find(|e| e.id == id) {
-            e.used = storage::now_secs();
+        // Cuando se uso dice cuando se visito el sitio: en incognito no queda.
+        if !incognito {
+            if let Some(e) = st.passwords.store.entries.iter_mut().find(|e| e.id == id) {
+                e.used = storage::now_secs();
+            }
+            st.passwords.save();
         }
-        st.passwords.save();
         fill_script(&username, &password)
     };
     let st = state.borrow();
@@ -628,6 +652,15 @@ mod tests {
         assert!(!secret.contains("gatito"));
         assert_eq!(unprotect(&secret).as_deref(), Some("gatito-123 ñ"));
         assert_eq!(unprotect("no es base64 de dpapi"), None);
+    }
+
+    #[test]
+    fn a_page_cannot_flood_the_save_question() {
+        let t0 = Instant::now();
+        assert!(capture_allowed(None, t0));
+        assert!(!capture_allowed(Some(t0), t0));
+        assert!(!capture_allowed(Some(t0), t0 + Duration::from_millis(2900)));
+        assert!(capture_allowed(Some(t0), t0 + CAPTURE_EVERY));
     }
 
     #[test]

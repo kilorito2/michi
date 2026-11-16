@@ -191,10 +191,29 @@
     var t = e.target;
     if (e.key === 'Enter' && t && t.type === 'password') grab(t.form || document);
   }, true);
+  // Un clic solo cuenta si es en el boton que envia: no en "mostrar
+  // contrasena", "olvide mi contrasena" o cualquier otro boton cerca del
+  // campo (antes se ofrecia guardar con cualquier clic).
+  function sendsForm(b, form) {
+    if (form) {
+      var type = (b.getAttribute('type') || '').toLowerCase();
+      // Un <button> sin type dentro de un formulario es de envio.
+      if (b.tagName === 'BUTTON' && (type === '' || type === 'submit')) return true;
+      if (b.tagName === 'INPUT' && type === 'submit') return true;
+      // O el unico boton del formulario (los que envian con JavaScript).
+      var all = form.querySelectorAll('button, input[type=submit], input[type=button], [role=button]');
+      return all.length === 1 && all[0] === b;
+    }
+    // Sin <form>: un boton que esta despues de un campo de contrasena escrito.
+    return Array.prototype.some.call(document.querySelectorAll('input[type=password]'), function (pw) {
+      return pw.value && (pw.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+  }
   window.addEventListener('click', function (e) {
     var b = e.target && e.target.closest && e.target.closest('button, input[type=submit], [role=button]');
     if (!b) return;
     var form = b.form || b.closest('form');
+    if (!sendsForm(b, form)) return;
     setTimeout(function () { grab(form || document); }, 0);
   }, true);
 })();
