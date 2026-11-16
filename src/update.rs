@@ -252,7 +252,7 @@ pub fn on_event(state: &Shared, event: Event) {
             drop(lock);
             if started {
                 // El instalador reemplaza michi.exe: Michi tiene que estar cerrado.
-                crate::security::quit(state);
+                crate::security::quit_now(state);
             } else {
                 state.borrow_mut().update.phase = Phase::Failed("No se pudo abrir el instalador".into());
             }

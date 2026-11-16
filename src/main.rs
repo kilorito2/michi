@@ -181,6 +181,7 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::ReloadHung(id) => recovery::reload_hung(&self.state, id),
             UserEvent::Update(event) => update::on_event(&self.state, event),
             UserEvent::PasswordsVerified(ok) => passwords::on_verified(&self.state, ok),
+            UserEvent::QuitConfirmed(yes) => security::on_quit_confirmed(&self.state, yes),
             UserEvent::OpenExternal(url) => {
                 win::bring_to_front();
                 if let Some(url) = url.filter(|u| single_instance::is_external_target(u)) {

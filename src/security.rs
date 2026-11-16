@@ -887,7 +887,64 @@ pub fn open_blocked_popup(state: &Shared) {
 /// Cerrar el navegador. Con "Borrar datos al cerrar" primero se borra todo
 /// (lo de WebView2 es asincrono: se sigue cuando termina, o a los
 /// QUIT_TIMEOUT si no termina). Despues, el cierre ordenado (ver shutdown).
+///
+/// Con descargas sin terminar, antes pregunta (ver confirm_quit).
 pub fn quit(state: &Shared) {
+    let unfinished = unfinished_downloads(&state.borrow().downloads);
+    if unfinished > 0 {
+        confirm_quit(state, unfinished);
+        return;
+    }
+    quit_now(state);
+}
+
+/// Cuantas descargas se cortarian al cerrar (en curso o en pausa).
+pub fn unfinished_downloads(downloads: &[crate::state::DownloadEntry]) -> usize {
+    downloads.iter().filter(|d| d.status == "downloading" || d.status == "paused").count()
+}
+
+/// "Hay descargas sin terminar, ¿cerrar igual?". El cuadro es modal: va en
+/// otro hilo (en este frenaria el bucle de eventos y los callbacks de
+/// WebView2), y la respuesta vuelve como UserEvent::QuitConfirmed.
+fn confirm_quit(state: &Shared, unfinished: usize) {
+    let proxy = {
+        let mut st = state.borrow_mut();
+        // Un segundo clic en cerrar con el cuadro abierto no abre otro.
+        if std::mem::replace(&mut st.quit_asking, true) {
+            return;
+        }
+        st.proxy.clone()
+    };
+    let Some(proxy) = proxy else { return };
+    let text = if unfinished == 1 {
+        "Hay una descarga sin terminar. Si cierras Michi, se cancela.\n\n¿Cerrar igual?".to_string()
+    } else {
+        format!("Hay {unfinished} descargas sin terminar. Si cierras Michi, se cancelan.\n\n¿Cerrar igual?")
+    };
+    std::thread::spawn(move || {
+        let yes = rfd::MessageDialog::new()
+            .set_parent(&crate::win::Owner)
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Descargas en curso")
+            .set_description(text)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show()
+            == rfd::MessageDialogResult::Yes;
+        let _ = proxy.send_event(crate::state::UserEvent::QuitConfirmed(yes));
+    });
+}
+
+/// La respuesta a confirm_quit.
+pub fn on_quit_confirmed(state: &Shared, yes: bool) {
+    state.borrow_mut().quit_asking = false;
+    if yes {
+        quit_now(state);
+    }
+}
+
+/// Cerrar sin preguntar: lo que hace quit() cuando no hay nada que perder, y
+/// la actualizacion (el instalador ya esta abierto y necesita a Michi cerrado).
+pub fn quit_now(state: &Shared) {
     if !state.borrow().settings.clear_on_exit {
         state.borrow_mut().request(Action::Shutdown);
         return;
@@ -1225,6 +1282,23 @@ mod tests {
         assert!(!popup_target_allowed(ext, web));
         assert!(popup_target_allowed(ext, "chrome-extension://abcdefghijklmnopabcdefghijklmnop/popup.html"));
         assert!(!popup_target_allowed(ext, "chrome-extension://ppppppppppppppppppppppppppppppp/x.html"));
+    }
+
+    #[test]
+    fn closing_asks_only_with_unfinished_downloads() {
+        let d = |status: &str| crate::state::DownloadEntry {
+            id: 1,
+            file_name: "a.zip".into(),
+            status: status.into(),
+            path: None,
+            received: 0,
+            total: None,
+            dangerous: false,
+            insecure_source: false,
+        };
+        assert_eq!(unfinished_downloads(&[]), 0);
+        assert_eq!(unfinished_downloads(&[d("completed"), d("failed"), d("cancelled"), d("blocked")]), 0);
+        assert_eq!(unfinished_downloads(&[d("downloading"), d("paused"), d("completed")]), 2);
     }
 
     #[test]

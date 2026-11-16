@@ -199,6 +199,9 @@ pub enum UserEvent {
     Update(crate::update::Event),
     /// Termino la verificacion de Windows Hello para ver una contrasena (ver passwords.rs).
     PasswordsVerified(bool),
+    /// El usuario contesto si cierra Michi con descargas sin terminar (ver
+    /// security::confirm_quit).
+    QuitConfirmed(bool),
 }
 
 /// Algo que hay que hacer en la proxima vuelta del bucle de eventos (ver
@@ -460,6 +463,8 @@ pub struct AppState {
     pub assistant_until: Option<Instant>,
     /// Lo que hay que escribir en el disco (ver AppState::flush_saves).
     saves: PendingSaves,
+    /// Preguntando si se cierra con descargas sin terminar (ver security::confirm_quit).
+    pub quit_asking: bool,
     /// Pestanas de la sesion anterior que todavia no se crearon (ver
     /// tabs::restore_next), en orden.
     pub restore_queue: Vec<RestoreTab>,
@@ -523,6 +528,7 @@ impl AppState {
             assistant_asking: false,
             assistant_until: None,
             saves: PendingSaves::default(),
+            quit_asking: false,
             restore_queue: Vec::new(),
             restore_index: HashMap::new(),
 
