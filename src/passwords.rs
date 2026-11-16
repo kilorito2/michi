@@ -44,8 +44,12 @@ const CLIPBOARD_FOR: Duration = Duration::from_secs(30);
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
 struct Store {
+    /// Una entrada que no se puede leer se descarta sola: si no, el archivo
+    /// entero se tomaba como danado (ver storage::load) y se perdian todas.
+    #[serde(deserialize_with = "storage::lenient_vec")]
     entries: Vec<Entry>,
     /// Sitios en los que nunca se ofrece guardar ("Nunca para este sitio").
+    #[serde(deserialize_with = "storage::lenient_vec")]
     never: Vec<String>,
     next_id: u64,
 }
@@ -624,6 +628,27 @@ mod tests {
         assert!(!secret.contains("gatito"));
         assert_eq!(unprotect(&secret).as_deref(), Some("gatito-123 ñ"));
         assert_eq!(unprotect("no es base64 de dpapi"), None);
+    }
+
+    #[test]
+    fn a_broken_entry_does_not_lose_the_others() {
+        let dir = storage::test_dir::TempDataDir::new("contrasenas");
+        let ok = |id: u64| {
+            json!({ "id": id, "origin": "https://a.com", "username": format!("u{id}"), "secret": "x", "created": 1, "updated": 1 })
+        };
+        let data = json!({
+            "entries": [ok(1), { "id": "no es un numero", "origin": 5 }, ok(3)],
+            "never": ["https://b.com", 7],
+            "next_id": 3,
+        });
+        std::fs::write(dir.path.join(FILE), data.to_string()).unwrap();
+        let p = Passwords::load();
+        let ids: Vec<u64> = p.store.entries.iter().map(|e| e.id).collect();
+        assert_eq!(ids, vec![1, 3]);
+        assert_eq!(p.store.never, vec!["https://b.com".to_string()]);
+        assert_eq!(p.store.next_id, 3);
+        // Nada se aparto como danado.
+        assert!(dir.path.join(FILE).exists());
     }
 
     #[test]

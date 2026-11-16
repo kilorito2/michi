@@ -61,11 +61,31 @@ pub fn migrate_old_profile() {
     }
 }
 
+/// Si el archivo falta, los valores por defecto. Si existe pero no se puede
+/// leer como JSON (un corte de luz a mitad de una escritura de una version
+/// vieja, un disco con errores, algo editado a mano), se aparta como
+/// "<nombre>.corrupto-<fecha>" antes de devolver los valores por defecto:
+/// si no, el proximo `save` lo pisaba y se perdia todo lo que tenia (las
+/// contrasenas o los marcadores enteros por un solo byte roto).
 pub fn load<T: DeserializeOwned + Default>(name: &str) -> T {
-    std::fs::read(data_dir().join(name))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    let path = data_dir().join(name);
+    let Ok(bytes) = std::fs::read(&path) else { return T::default() };
+    match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(err) => {
+            let backup = quarantine_name(name, now_secs());
+            match std::fs::rename(&path, data_dir().join(&backup)) {
+                Ok(()) => eprintln!("[storage] {name} esta danado ({err}): quedo aparte como {backup}"),
+                Err(e) => eprintln!("[storage] {name} esta danado ({err}) y no se pudo apartar ({e})"),
+            }
+            T::default()
+        }
+    }
+}
+
+/// Nombre con el que se aparta un archivo danado (ver load).
+fn quarantine_name(name: &str, when: u64) -> String {
+    format!("{name}.corrupto-{when}")
 }
 
 pub fn save<T: Serialize>(name: &str, value: &T) {
@@ -83,9 +103,37 @@ pub fn remove(name: &str) {
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
     let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
+    let mut file = std::fs::File::create(&tmp)?;
+    file.write_all(bytes)?;
+    // Que los datos esten de verdad en el disco antes de reemplazar el
+    // archivo bueno: si no, un corte de luz justo despues del rename podia
+    // dejar el archivo nuevo vacio.
+    file.sync_all()?;
+    drop(file);
     std::fs::rename(&tmp, path)
+}
+
+/// Para campos que son listas: cada elemento que no se puede leer se
+/// descarta solo, en vez de hacer fallar el archivo entero (ver
+/// passwords::Store).
+pub fn lenient_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    let raw: Vec<serde_json::Value> = Deserialize::deserialize(deserializer)?;
+    Ok(raw
+        .into_iter()
+        .filter_map(|v| match serde_json::from_value(v) {
+            Ok(item) => Some(item),
+            Err(err) => {
+                eprintln!("[storage] se descarta un elemento que no se pudo leer: {err}");
+                None
+            }
+        })
+        .collect())
 }
 
 pub const SETTINGS_FILE: &str = "settings.json";
@@ -364,6 +412,38 @@ mod tests {
             resolve_input("hola mundo", "duckduckgo").unwrap(),
             "https://duckduckgo.com/?q=hola+mundo"
         );
+    }
+
+    #[test]
+    fn a_damaged_file_is_set_aside_instead_of_overwritten() {
+        let dir = test_dir::TempDataDir::new("danado");
+        std::fs::write(dir.path.join(BOOKMARKS_FILE), b"[{\"title\": \"a\", \"url\": ").unwrap();
+        let loaded: Vec<Bookmark> = load(BOOKMARKS_FILE);
+        assert!(loaded.is_empty());
+        assert!(!dir.path.join(BOOKMARKS_FILE).exists());
+        let set_aside: Vec<String> = std::fs::read_dir(&dir.path)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("bookmarks.json.corrupto-"))
+            .collect();
+        assert_eq!(set_aside.len(), 1);
+        assert_eq!(
+            std::fs::read(dir.path.join(&set_aside[0])).unwrap(),
+            b"[{\"title\": \"a\", \"url\": ".to_vec()
+        );
+        // Un archivo que falta no se aparta ni falla: valores por defecto.
+        let missing: Vec<Bookmark> = load("no-existe.json");
+        assert!(missing.is_empty());
+        assert_eq!(quarantine_name("a.json", 7), "a.json.corrupto-7");
+    }
+
+    #[test]
+    fn saving_replaces_the_file_atomically() {
+        let dir = test_dir::TempDataDir::new("guardar");
+        save(BOOKMARKS_FILE, &vec![Bookmark { title: "x".into(), url: "https://x.com/".into(), folder: String::new() }]);
+        let loaded: Vec<Bookmark> = load(BOOKMARKS_FILE);
+        assert_eq!(loaded.len(), 1);
+        assert!(!dir.path.join("bookmarks.tmp").exists());
     }
 
     #[test]
