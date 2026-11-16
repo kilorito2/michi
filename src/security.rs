@@ -102,6 +102,10 @@ pub struct TabSecurity {
     /// sitio): no va al historial (ver tabs::open_tab). Pasa seguido con
     /// HTTPS primero: el intento por HTTPS de un sitio que no lo tiene.
     pub error_page: bool,
+    /// Pase de un solo uso para que Michi lleve esta pestana a una pagina
+    /// propia: la ruta ("/crashed", "/"...) y cuando se dio (ver
+    /// grant_own_page y own_page_nav_allowed).
+    pub own_page_pass: Option<(String, Instant)>,
 }
 
 pub struct Upgrade {
@@ -128,6 +132,9 @@ pub enum Blocked {
 
 /// Lo bloqueado que se recuerda por pagina (los mas nuevos).
 const MAX_BLOCKED: usize = 10;
+/// Cuanto vale el pase de grant_own_page: la navegacion que lo usa arranca
+/// enseguida; un pase que no se uso no tiene que quedar dando vueltas.
+const OWN_PAGE_PASS_FOR: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------
 // Proceso y WebViews
@@ -362,6 +369,10 @@ fn on_navigation_starting(state: &Shared, core: &ICoreWebView2, id: u64) {
                 kind == COREWEBVIEW2_NAVIGATION_KIND_NEW_DOCUMENT
             })
             .unwrap_or(true);
+        if guard_own_page(&s, id, &uri, new_document) {
+            unsafe { args.SetCancel(true)? };
+            return Ok(());
+        }
         if https_first(&s, id, &uri, nav_id, redirected.as_bool(), new_document) {
             unsafe { args.SetCancel(true)? };
         }
@@ -369,6 +380,66 @@ fn on_navigation_starting(state: &Shared, core: &ICoreWebView2, id: u64) {
     }));
     let mut token = 0i64;
     let _ = unsafe { core.add_NavigationStarting(&handler, &mut token) };
+}
+
+/// Michi va a llevar la pestana `id` a `url` (no la pagina que muestra): si
+/// es una pagina propia, deja el pase para esa navegacion (ver
+/// guard_own_page). Hay que llamarlo antes de cada navegacion que decide
+/// Michi o el usuario desde la interfaz: Action::LoadUrl (avisos de HTTPS,
+/// "dejo de funcionar"), la barra de direcciones, marcadores, sugerencias,
+/// el pipe de control.
+pub fn grant_own_page(st: &mut AppState, id: u64, url: &str) {
+    let Some(path) = own_page_path(url) else { return };
+    if let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) {
+        tab.sec.own_page_pass = Some((path.to_string(), Instant::now()));
+    }
+}
+
+/// Paginas propias fuera del alcance de los sitios: una navegacion NUEVA a una
+/// de ellas se cancela si la empezo la pagina que muestra la pestana (un
+/// enlace, location = ..., un formulario). En una pestana con un sitio, la
+/// unica forma de llegar es el pase de grant_own_page; desde una pagina propia
+/// si se puede ir a otra (la pestana nueva a ajustes, el aviso de HTTPS a la
+/// pestana nueva). Atras/adelante/recargar no se tocan: esa entrada ya la abrio
+/// el usuario antes. Devuelve si hay que cancelarla.
+///
+/// Por que hace falta: el protocolo app:// esta registrado en las pestanas, y
+/// en un sitio cualquiera un `location = "http://app.localhost/insecure"`
+/// llevaba la pestana al aviso (y "Continuar" abria por HTTP el sitio que
+/// quedara anotado), o a los ajustes con la seccion que eligiera el sitio.
+fn guard_own_page(state: &Shared, id: u64, uri: &str, new_document: bool) -> bool {
+    if !is_own_page(uri) || !new_document {
+        return false;
+    }
+    let mut st = state.borrow_mut();
+    let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) else { return false };
+    let path = own_page_path(uri);
+    let pass = &mut tab.sec.own_page_pass;
+    // El pase solo se usa con la navegacion para la que se dio.
+    let has_pass = pass.as_ref().is_some_and(|(p, at)| Some(p.as_str()) == path && at.elapsed() < OWN_PAGE_PASS_FOR);
+    if has_pass {
+        *pass = None;
+    }
+    let allowed = own_page_nav_allowed(&tab.url, has_pass);
+    if !allowed {
+        eprintln!("[seguridad] {} no puede llevar la pestana a {uri}", tab.url);
+    }
+    !allowed
+}
+
+/// Regla de guard_own_page para una navegacion nueva a una pagina propia:
+/// con el pase de Michi, o si la pestana ya muestra una pagina propia
+/// (`current`, la direccion de la pagina que la empieza). Una pestana en
+/// about:blank no cuenta: es la que abre un sitio con window.open() y despues
+/// lleva a donde quiere.
+pub fn own_page_nav_allowed(current: &str, has_pass: bool) -> bool {
+    has_pass || is_own_page(current)
+}
+
+/// Si la pestana deja la pagina de aviso de HTTPS (`old` -> `new`): el sitio
+/// que esperaba ahi ya no importa (ver TabSecurity::insecure_target).
+pub fn leaves_insecure_page(old: &str, new: &str) -> bool {
+    own_page_path(old) == Some("/insecure") && own_page_path(new) != Some("/insecure")
 }
 
 /// Decide una navegacion que arranca (ver on_navigation_starting). Devuelve
@@ -1103,6 +1174,30 @@ mod tests {
         assert!(!popup_target_allowed(ext, web));
         assert!(popup_target_allowed(ext, "chrome-extension://abcdefghijklmnopabcdefghijklmnop/popup.html"));
         assert!(!popup_target_allowed(ext, "chrome-extension://ppppppppppppppppppppppppppppppp/x.html"));
+    }
+
+    #[test]
+    fn sites_cannot_take_a_tab_to_an_internal_page() {
+        // Desde un sitio (o una ventana en blanco que abrio un sitio): no.
+        assert!(!own_page_nav_allowed("https://malo.com/", false));
+        assert!(!own_page_nav_allowed("about:blank", false));
+        assert!(!own_page_nav_allowed("chrome-extension://abc/x.html", false));
+        assert!(!own_page_nav_allowed("https://evil.com/?app.localhost", false));
+        // Con el pase de Michi (aviso de HTTPS, pagina caida, la barra) si.
+        assert!(own_page_nav_allowed("https://malo.com/", true));
+        // De una pagina propia a otra, si (la pestana nueva recien creada tambien).
+        assert!(own_page_nav_allowed("app://localhost/", false));
+        assert!(own_page_nav_allowed("http://app.localhost/insecure", false));
+        assert!(own_page_nav_allowed("http://app.localhost/settings#about", false));
+    }
+
+    #[test]
+    fn the_pending_site_is_forgotten_when_leaving_the_warning() {
+        assert!(leaves_insecure_page("http://app.localhost/insecure", "http://ejemplo.com/"));
+        assert!(leaves_insecure_page("http://app.localhost/insecure", "http://app.localhost/"));
+        assert!(!leaves_insecure_page("http://app.localhost/insecure", "http://app.localhost/insecure"));
+        assert!(!leaves_insecure_page("https://ejemplo.com/", "http://app.localhost/insecure"));
+        assert!(!leaves_insecure_page("https://ejemplo.com/", "https://otro.com/"));
     }
 
     #[test]

@@ -116,7 +116,12 @@ fn run(state: &Shared, action: Action) {
         Action::LoadUrl(id, url) => {
             // El puntero COM y no el WebView: el prestamo de `state` se suelta
             // antes de navegar (los eventos de la navegacion lo vuelven a pedir).
-            let core = state.borrow().tabs.iter().find(|t| t.id == id).map(|t| t.webview.webview());
+            let core = {
+                let mut st = state.borrow_mut();
+                // La decidio Michi: puede ir a una pagina propia (ver security::guard_own_page).
+                crate::security::grant_own_page(&mut st, id, &url);
+                st.tabs.iter().find(|t| t.id == id).map(|t| t.webview.webview())
+            };
             if let Some(core) = core {
                 let _ = unsafe { core.Navigate(&windows_core::HSTRING::from(url.as_str())) };
             }

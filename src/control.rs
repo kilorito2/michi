@@ -254,6 +254,8 @@ pub fn handle(state: &Shared, req: Request) {
                 (Some(url), Some((id, core))) => {
                     // En una pestana que ya existe, la propia va con su forma http.
                     let url = if url == HOME_URL { HOME_LOAD_URL.to_string() } else { url };
+                    // resolve() ya descarta las propias salvo la pestana nueva.
+                    crate::security::grant_own_page(&mut state.borrow_mut(), id, &url);
                     let _ = unsafe { core.Navigate(&HSTRING::from(url.as_str())) };
                     ok(json!({ "id": id, "url": url }))
                 }

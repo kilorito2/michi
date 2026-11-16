@@ -148,6 +148,11 @@ fn create_tab(
                 let (title_snapshot, finished, error_page, incognito) = {
                     let mut st = state_load.borrow_mut();
                     if let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) {
+                        // Salio del aviso de HTTPS: el sitio que esperaba ahi
+                        // ya no es "el de la pestana" (ver Tab::real_url).
+                        if security::leaves_insecure_page(&tab.url, &page_url) {
+                            tab.sec.insecure_target = None;
+                        }
                         tab.url = page_url.clone();
                         tab.loading = matches!(event, PageLoadEvent::Started);
                         // Lo de la pagina caida ya paso (salvo en la pagina que lo cuenta).

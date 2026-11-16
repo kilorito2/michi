@@ -49,12 +49,15 @@ fn pipe_name() -> String {
 }
 
 /// Solo lo que un enlace o un archivo puede pedir: web y archivos locales.
-/// Nunca javascript:, data:, app:// ni nada que no se navegue. Lo mismo que
-/// acepta main::url_from_args, revisado de nuevo del lado del principal: el
-/// pipe es una entrada mas y no se le cree a ciegas.
+/// Nunca javascript:, data:, nuestras paginas propias (ni app:// ni su forma
+/// http://app.localhost: otra aplicacion no tiene por que abrir los ajustes)
+/// ni nada que no se navegue. Lo mismo que acepta main::url_from_args,
+/// revisado de nuevo del lado del principal: el pipe es una entrada mas y no
+/// se le cree a ciegas.
 pub fn is_external_target(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
-    lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("file:///")
+    (lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("file:///"))
+        && !crate::state::is_own_page(&lower)
 }
 
 /// Si ya hay un Michi abierto (de esta instalacion), le pasa `url` (None = solo
@@ -212,6 +215,9 @@ mod tests {
         assert_eq!(opened(parse(b"1javascript:alert(1)")), None);
         assert_eq!(opened(parse(b"1data:text/html,hola")), None);
         assert_eq!(opened(parse(b"1app://localhost/settings")), None);
+        assert_eq!(opened(parse(b"1http://app.localhost/settings")), None);
+        assert_eq!(opened(parse(b"1HTTP://APP.LOCALHOST/insecure")), None);
+        assert_eq!(opened(parse(b"1https://app.localhost/")), None);
         // Mensajes mal formados.
         assert_eq!(opened(parse(b"")), None);
         assert_eq!(opened(parse(b"0extra")), None);

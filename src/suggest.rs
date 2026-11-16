@@ -376,9 +376,7 @@ fn open_url(state: &Shared, url: &str) {
     if !crate::security::is_safe_to_open(url) {
         return;
     }
-    if let Some(tab) = state.borrow().active_tab() {
-        let _ = tab.webview.load_url(url);
-    }
+    crate::ipc::load_in_active(state, url);
 }
 
 // ---------------------------------------------------------------------------

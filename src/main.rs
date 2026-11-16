@@ -312,12 +312,17 @@ fn open_startup_tabs(state: &Shared) {
 /// abre un .html (ver el registro que hace el instalador). Solo web y
 /// archivos locales: nunca javascript:, data: ni nada que no sea navegable.
 fn url_from_args() -> Option<String> {
-    let arg = std::env::args().nth(1)?;
+    url_from_arg(&std::env::args().nth(1)?)
+}
+
+/// La direccion que corresponde a un argumento (ver url_from_args). Nunca una
+/// pagina propia (ver single_instance::is_external_target).
+fn url_from_arg(arg: &str) -> Option<String> {
     let lower = arg.to_ascii_lowercase();
     if lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("file:///") {
-        return Some(arg);
+        return single_instance::is_external_target(arg).then(|| arg.to_string());
     }
-    let path = std::path::Path::new(&arg);
+    let path = std::path::Path::new(arg);
     if !path.is_absolute() || !path.is_file() {
         return None;
     }
@@ -377,4 +382,20 @@ fn main() {
     control::listen(event_loop.create_proxy());
     let mut app = App::new(event_loop.create_proxy());
     event_loop.run_app(&mut app).expect("fallo el bucle de eventos");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn links_from_other_apps_never_open_internal_pages() {
+        assert_eq!(url_from_arg("https://youtube.com/").as_deref(), Some("https://youtube.com/"));
+        assert_eq!(url_from_arg("file:///C:/x/a.html").as_deref(), Some("file:///C:/x/a.html"));
+        assert_eq!(url_from_arg("http://app.localhost/settings"), None);
+        assert_eq!(url_from_arg("HTTP://App.Localhost/insecure"), None);
+        assert_eq!(url_from_arg("app://localhost/settings"), None);
+        assert_eq!(url_from_arg("javascript:alert(1)"), None);
+        assert_eq!(url_from_arg("relativo.html"), None);
+    }
 }

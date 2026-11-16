@@ -199,7 +199,7 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
         Command::Navigate { url } => {
             // Marcadores e historial: nunca codigo (javascript:) ni paginas armadas (data:).
             if security::is_safe_to_open(&url) {
-                with_active(state, |w| { let _ = w.load_url(&url); });
+                load_in_active(state, &url);
             }
         }
         Command::NavigateInput { input } => navigate_input(state, &input),
@@ -676,8 +676,21 @@ fn menu_action(state: &Shared, action: &str) {
 pub fn navigate_input(state: &Shared, input: &str) {
     let engine = state.borrow().settings.search_engine.clone();
     if let Some(url) = storage::resolve_input(input, &engine) {
-        with_active(state, |w| { let _ = w.load_url(&url); });
+        load_in_active(state, &url);
     }
+}
+
+/// Lleva la pestana activa a `url`, que eligio el usuario desde la interfaz
+/// (la barra, un marcador, una sugerencia): puede ser una pagina propia (ver
+/// security::grant_own_page).
+pub fn load_in_active(state: &Shared, url: &str) {
+    {
+        let mut st = state.borrow_mut();
+        if let Some(id) = st.active_tab().map(|t| t.id) {
+            security::grant_own_page(&mut st, id, url);
+        }
+    }
+    with_active(state, |w| { let _ = w.load_url(url); });
 }
 
 fn window(state: &Shared) -> Option<std::rc::Rc<winit::window::Window>> {
