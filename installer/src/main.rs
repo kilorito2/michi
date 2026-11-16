@@ -45,6 +45,26 @@ const HEIGHT: f64 = 560.0;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const NO_PAYLOAD: &str = "Este instalador no trae los archivos del navegador. Generalo con tools/build_installer.ps1.";
 
+/// Los bytes de un fondo de assets/wallpapers/optimized. Esos archivos no
+/// estan en el repositorio (ver build.rs): sin `cfg(fondos)` queda vacio y la
+/// pagina usa un degradado de reserva, para que el workspace compile en un
+/// clon limpio y en GitHub Actions.
+#[cfg(fondos)]
+macro_rules! fondo {
+    ($name:literal) => {
+        include_bytes!(concat!("../../assets/wallpapers/optimized/", $name))
+    };
+}
+#[cfg(not(fondos))]
+macro_rules! fondo {
+    ($name:literal) => {
+        &[]
+    };
+}
+
+/// Hay fondos incrustados (ver build.rs).
+const HAS_BACKDROPS: bool = cfg!(fondos);
+
 /// Fondos para elegir (los mismos ids que protocol::THEMES del navegador),
 /// en su version chica y difuminada: sirven de vista previa y de fondo del
 /// propio instalador.
@@ -59,25 +79,25 @@ const THEMES: &[Theme] = &[
     Theme {
         id: "sleepy-rainy-evening",
         label: "Lluvia nocturna",
-        bytes: include_bytes!("../../assets/wallpapers/optimized/sleepy-rainy-evening.blur.mp4"),
+        bytes: fondo!("sleepy-rainy-evening.blur.mp4"),
         mime: "video/mp4",
     },
     Theme {
         id: "torii-carmesi",
         label: "Torii carmesi",
-        bytes: include_bytes!("../../assets/wallpapers/optimized/torii-carmesi.blur.jpg"),
+        bytes: fondo!("torii-carmesi.blur.jpg"),
         mime: "image/jpeg",
     },
     Theme {
         id: "blindfolded-girl",
         label: "Petalos y luna",
-        bytes: include_bytes!("../../assets/wallpapers/optimized/blindfolded-girl.blur.mp4"),
+        bytes: fondo!("blindfolded-girl.blur.mp4"),
         mime: "video/mp4",
     },
     Theme {
         id: "wuthering-waves-chisa",
         label: "Wuthering Waves",
-        bytes: include_bytes!("../../assets/wallpapers/optimized/wuthering-waves-chisa.blur.mp4"),
+        bytes: fondo!("wuthering-waves-chisa.blur.mp4"),
         mime: "video/mp4",
     },
 ];
@@ -180,6 +200,7 @@ impl App {
             // desinstalador usa ese fondo).
             "currentTheme": current.get("theme").and_then(|v| v.as_str()),
             "currentEngine": current.get("searchEngine").and_then(|v| v.as_str()),
+            "hasBackdrops": HAS_BACKDROPS,
             "themes": THEMES.iter().map(|t| json!({ "id": t.id, "label": t.label, "video": t.mime == "video/mp4" })).collect::<Vec<_>>(),
             "engines": ENGINES.iter().map(|(id, label)| json!({ "id": id, "label": label })).collect::<Vec<_>>(),
             "webview2": wry::webview_version().unwrap_or_default(),
@@ -380,6 +401,7 @@ fn serve(request: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         _ => path
             .strip_prefix("/fondos/")
             .and_then(|id| THEMES.iter().find(|t| t.id == id))
+            .filter(|t| !t.bytes.is_empty())
             .map(|t| (t.bytes, t.mime)),
     };
     let Some((body, mime)) = found else {

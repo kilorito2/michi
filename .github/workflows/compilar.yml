@@ -1,6 +1,8 @@
 # Compila y prueba Michi en GitHub con cada cambio (gratis en repositorios
 # publicos). El instalador no se arma aca: lleva los fondos animados, que son
 # de terceros y no estan en el repositorio (ver tools/build_installer.ps1).
+# Sin ellos el instalador igual compila, con un degradado de reserva (ver
+# installer/build.rs), asi que todo el workspace se prueba aca.
 name: Compilar y probar
 
 on:
@@ -19,12 +21,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Rust estable
-        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+        run: rustup toolchain install stable --profile minimal --component clippy --no-self-update && rustup default stable
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Pruebas
         run: cargo test --workspace --locked
+
+      - name: Clippy (sin avisos)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Compilar (release)
         run: cargo build --workspace --release --locked

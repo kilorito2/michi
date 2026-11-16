@@ -11,9 +11,23 @@ Set-Location $root
 $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
 "== Michi $version"
 
+# Los fondos no estan en el repositorio (son de terceros): sin ellos el
+# instalador compila igual pero con un degradado de reserva (ver
+# installer/build.rs). El que se publica tiene que llevarlos todos.
+$wallpapers = Join-Path $root 'assets\wallpapers\optimized'
+$needed = @('sleepy-rainy-evening.blur.mp4', 'torii-carmesi.blur.jpg', 'blindfolded-girl.blur.mp4', 'wuthering-waves-chisa.blur.mp4')
+$missing = @($needed | Where-Object { -not (Test-Path (Join-Path $wallpapers $_)) })
+if ($missing.Count -gt 0) {
+    throw "Faltan fondos en $wallpapers ($($missing -join ', ')). Generalos con tools/encode_wallpapers.sh antes de armar el instalador."
+}
+
 "== Compilando el navegador y el instalador (release)"
+# Que installer/build.rs falle (y no use el degradado) si igual faltara uno.
+$env:MICHI_FONDOS_OBLIGATORIOS = '1'
 cargo build --release -p michi -p michi-setup
-if ($LASTEXITCODE -ne 0) { throw "fallo la compilacion" }
+$status = $LASTEXITCODE
+Remove-Item Env:MICHI_FONDOS_OBLIGATORIOS
+if ($status -ne 0) { throw "fallo la compilacion" }
 
 # Lo que se instala: el .exe y los fondos (solo las versiones optimizadas).
 $files = @(@{ Path = 'michi.exe'; Source = Join-Path $root 'target\release\michi.exe' })

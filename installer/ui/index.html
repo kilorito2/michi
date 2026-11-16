@@ -38,6 +38,14 @@
     opacity: 0; transition: opacity .9s ease;
   }
   #backdrop > .shown { opacity: 1; }
+  /* Sin fondos incrustados (compilado sin assets/wallpapers, ver build.rs):
+     un degradado de reserva en el fondo y en las vistas previas. */
+  body.no-fondos #backdrop {
+    background:
+      radial-gradient(ellipse at 18% 30%, rgba(255,92,60,0.35), transparent 60%),
+      radial-gradient(ellipse at 85% 80%, rgba(120,90,255,0.30), transparent 55%),
+      linear-gradient(135deg, #1b1630, #0c0b16);
+  }
   #backdrop img { animation: drift 30s ease-in-out infinite alternate; }
   @keyframes drift { from { transform: scale(1); } to { transform: scale(1.08); } }
   #veil {
@@ -174,6 +182,7 @@
   }
   .theme:hover { transform: translateY(-2px); }
   .theme video, .theme img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  body.no-fondos .theme { background: linear-gradient(135deg, #2a2148, #16142a); }
   .theme .label {
     position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 10px 7px; font-size: 12px; text-align: left;
     background: linear-gradient(transparent, rgba(0,0,0,0.72));
@@ -454,6 +463,7 @@
   // ---- Fondo: el tema elegido, con fundido al cambiar ----
   var backdrop = $('backdrop');
   function setBackdrop(id) {
+    if (!data.hasBackdrops) return;
     var theme = data.themes.filter(function (t) { return t.id === id; })[0] || data.themes[0];
     var current = backdrop.querySelector('.shown');
     if (current && current.getAttribute('data-id') === theme.id) return;
@@ -514,10 +524,12 @@
       b.className = 'theme';
       b.setAttribute('data-id', t.id);
       b.setAttribute('aria-label', 'Fondo ' + t.label);
-      var media = document.createElement(t.video ? 'video' : 'img');
-      if (t.video) { media.muted = true; media.loop = true; media.playsInline = true; media.autoplay = true; }
-      media.src = '/fondos/' + t.id;
-      b.appendChild(media);
+      if (data.hasBackdrops) {
+        var media = document.createElement(t.video ? 'video' : 'img');
+        if (t.video) { media.muted = true; media.loop = true; media.playsInline = true; media.autoplay = true; }
+        media.src = '/fondos/' + t.id;
+        b.appendChild(media);
+      }
       var label = document.createElement('span');
       label.className = 'label';
       label.textContent = t.label;
@@ -612,6 +624,7 @@
   window.app = {
     init: function (d) {
       data = d;
+      if (!d.hasBackdrops) document.body.classList.add('no-fondos');
       $('version').textContent = 'Version ' + d.version;
       setDir(d.defaultDir);
       if (d.mode === 'uninstall') {

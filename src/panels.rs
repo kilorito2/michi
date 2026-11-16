@@ -186,7 +186,7 @@ fn watch_cursor(state: &Shared) {
                 continue;
             }
             let in_x = match side {
-                Side::Left => x >= 0.0 && x < PANEL_W,
+                Side::Left => (0.0..PANEL_W).contains(&x),
                 Side::Right => x >= win_w - PANEL_W && x < win_w,
             };
             let inside = in_x && y >= TOPBAR_H && y < win_h;
