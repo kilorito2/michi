@@ -354,7 +354,9 @@ sigue andando).
   primera vez que se conecta, Michi pregunta si lo permites (después se cambia
   en Ajustes > Privacidad y seguridad). Nunca llega a las páginas internas
   (ajustes, contraseñas) ni a tus pestañas de incógnito, solo a las que abre
-  May, y mientras lo usa la barra muestra **May**.
+  May, y mientras lo usa la barra muestra **May**. Solo acepta los comandos
+  DevTools que leen y usan la página de esa pestaña: nada de otras pestañas,
+  las cookies de todos los sitios, las descargas o tus archivos.
 - **Zoom por sitio**: si agrandas un sitio al 125%, todas sus páginas abren al
   125%, en esa pestaña y en las próximas (como en Chrome). Al volver al
   predeterminado, el sitio se olvida; en **Ajustes › Apariencia** se olvidan

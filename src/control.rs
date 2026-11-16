@@ -54,6 +54,19 @@ const MAX_REQUEST: usize = 4 * 1024 * 1024;
 const REPLY_TIMEOUT: Duration = Duration::from_secs(60);
 /// Cuanto sigue el aviso de la barra despues del ultimo pedido.
 const INDICATOR_FOR: Duration = Duration::from_secs(8);
+/// Conexiones atendidas a la vez: cada una es un hilo, y un programa que
+/// abriera miles se comeria la memoria del navegador.
+const MAX_CONNECTIONS: usize = 8;
+/// Conexiones en curso (ver MAX_CONNECTIONS).
+static ACTIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Descuenta la conexion al terminar, pase lo que pase en serve().
+struct Slot;
+impl Drop for Slot {
+    fn drop(&mut self) {
+        ACTIVE.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
 
 /// Un pedido que llego por el pipe, para resolverlo en el hilo de la interfaz.
 #[derive(Debug, Clone)]
@@ -80,10 +93,18 @@ pub fn listen(proxy: EventLoopProxy<UserEvent>) {
         );
         loop {
             let pipe = listener.accept();
+            if ACTIVE.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= MAX_CONNECTIONS {
+                drop(Slot);
+                reply_and_close(pipe, &error("Demasiados pedidos a la vez: vuelve a intentarlo."));
+                continue;
+            }
             // Cada conexion en su hilo: un CDP lento no frena a los demas.
             let proxy = proxy.clone();
             let pipe = pipe as usize;
-            std::thread::spawn(move || serve(pipe as HANDLE, &proxy));
+            std::thread::spawn(move || {
+                let _slot = Slot;
+                serve(pipe as HANDLE, &proxy)
+            });
         }
     });
 }
@@ -103,6 +124,12 @@ fn write_discovery(pipe: &str) {
     let _ = std::fs::write(dir.join(DISCOVERY_FILE), info.to_string());
 }
 
+/// Al cerrar Michi: sin control.json, un cliente no intenta hablarle a un
+/// pipe que ya no existe (ver security::shutdown).
+pub fn forget_discovery() {
+    storage::remove(DISCOVERY_FILE);
+}
+
 fn serve(pipe: HANDLE, proxy: &EventLoopProxy<UserEvent>) {
     let response = match read_line(pipe).and_then(|raw| serde_json::from_slice::<Value>(&raw).ok()) {
         None => error("pedido inválido"),
@@ -115,6 +142,11 @@ fn serve(pipe: HANDLE, proxy: &EventLoopProxy<UserEvent>) {
             }
         }
     };
+    reply_and_close(pipe, &response);
+}
+
+/// Escribe la respuesta (una linea JSON) y cierra la conexion.
+fn reply_and_close(pipe: HANDLE, response: &Value) {
     let mut out = response.to_string();
     out.push('\n');
     let mut written = 0u32;
@@ -275,6 +307,9 @@ pub fn handle(state: &Shared, req: Request) {
                 Some((id, _)) if !cdp_allowed(state, id) => {
                     error("Michi no deja controlar sus páginas internas (ajustes, avisos) desde otro programa.")
                 }
+                Some(_) if !cdp_method_allowed(&method, &params) => {
+                    error("Michi no permite ese comando de DevTools desde otro programa.")
+                }
                 Some(_) if !navigation_allowed(&method, &params) => error("dirección inválida"),
                 Some((_, core)) => {
                     // La respuesta llega despues, en el callback.
@@ -383,6 +418,46 @@ fn resolve(state: &Shared, body: &Value) -> Option<String> {
 fn is_allowed_target(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
     (lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("file:///")) && !is_own_page(url)
+}
+
+/// Los comandos CDP que se le aceptan al pipe. Lista de PERMITIDOS: lo que
+/// necesita un asistente para leer y usar la pagina de una pestana (leer el
+/// DOM, evaluar JS en la pagina, clics y teclas, capturas, accesibilidad). Lo
+/// demas no, porque CDP alcanza mucho mas que la pestana pedida:
+/// - Target, Browser, SystemInfo, IO, Storage...: otras pestanas (las de
+///   incognito del usuario, las paginas internas), el proceso, archivos.
+/// - Las cookies de todo el perfil (Network.getAllCookies, Storage.getCookies,
+///   Network.getCookies sin decir de que sitios).
+/// - Cambiar a donde van las descargas (setDownloadBehavior).
+/// - Lo que sobrevive a una navegacion: un script de
+///   Page.addScriptToEvaluateOnNewDocument o Page.setBypassCSP seguirian
+///   activos si la pestana llega despues a Ajustes, y desde ahi tendrian el IPC
+///   de las paginas propias (cdp_allowed solo mira la pagina al mandar el comando).
+/// - DOM.setFileInputFiles: subir a la pagina cualquier archivo del equipo.
+fn cdp_method_allowed(method: &str, params: &Value) -> bool {
+    const DOMAINS: &[&str] = &["Page", "Runtime", "DOM", "Input", "Accessibility", "Emulation", "Network"];
+    const DENIED: &[&str] = &[
+        "Page.setDownloadBehavior",
+        "Page.addScriptToEvaluateOnNewDocument",
+        "Page.setBypassCSP",
+        "Page.setInterceptFileChooserDialog",
+        "DOM.setFileInputFiles",
+        "Runtime.addBinding",
+    ];
+    // De Network, solo lo minimo: saber que carga la pagina y las cookies de
+    // los sitios que se nombran.
+    const NETWORK: &[&str] = &["Network.enable", "Network.disable", "Network.getCookies"];
+    let Some((domain, name)) = method.split_once('.') else { return false };
+    if name.is_empty() || !DOMAINS.contains(&domain) || DENIED.contains(&method) {
+        return false;
+    }
+    if domain == "Network" && !NETWORK.contains(&method) {
+        return false;
+    }
+    if method == "Network.getCookies" {
+        return params.get("urls").and_then(Value::as_array).is_some_and(|u| !u.is_empty());
+    }
+    true
 }
 
 /// Page.navigate por CDP: con el mismo filtro que "navigate".
@@ -505,5 +580,59 @@ mod tests {
         assert!(navigation_allowed("Page.navigate", &json!({ "url": "https://example.com/" })));
         assert!(!navigation_allowed("Page.navigate", &json!({ "url": "http://app.localhost/settings" })));
         assert!(!navigation_allowed("Page.navigate", &json!({})));
+    }
+
+    #[test]
+    fn cdp_only_what_reads_and_uses_the_page() {
+        let none = json!({});
+        // Lo que usa un asistente para leer y usar la pagina.
+        for m in [
+            "Page.captureScreenshot",
+            "Page.navigate",
+            "Page.reload",
+            "Runtime.evaluate",
+            "Runtime.callFunctionOn",
+            "DOM.getDocument",
+            "DOM.querySelector",
+            "DOM.getBoxModel",
+            "Input.dispatchMouseEvent",
+            "Input.dispatchKeyEvent",
+            "Input.insertText",
+            "Accessibility.getFullAXTree",
+            "Emulation.setDeviceMetricsOverride",
+            "Network.enable",
+        ] {
+            assert!(cdp_method_allowed(m, &none), "{m}");
+        }
+        assert!(cdp_method_allowed("Network.getCookies", &json!({ "urls": ["https://a.com/"] })));
+        // Otras pestanas, el proceso, archivos, todas las cookies, descargas.
+        for m in [
+            "Target.getTargets",
+            "Target.attachToTarget",
+            "Target.createTarget",
+            "Browser.close",
+            "Browser.setDownloadBehavior",
+            "Browser.grantPermissions",
+            "SystemInfo.getProcessInfo",
+            "IO.read",
+            "Storage.getCookies",
+            "Storage.clearDataForOrigin",
+            "Network.getAllCookies",
+            "Network.setCookie",
+            "Network.clearBrowserCookies",
+            "Page.setDownloadBehavior",
+            "Page.addScriptToEvaluateOnNewDocument",
+            "Page.setBypassCSP",
+            "DOM.setFileInputFiles",
+            "Fetch.enable",
+            "Security.setIgnoreCertificateErrors",
+            "Page.",
+            "Page",
+            "",
+        ] {
+            assert!(!cdp_method_allowed(m, &none), "{m}");
+        }
+        assert!(!cdp_method_allowed("Network.getCookies", &none));
+        assert!(!cdp_method_allowed("Network.getCookies", &json!({ "urls": [] })));
     }
 }

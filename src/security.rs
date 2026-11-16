@@ -823,6 +823,7 @@ pub fn shutdown(state: &Shared) {
         }
         st.shutting_down = true;
         st.save_session();
+        crate::control::forget_discovery();
         st.quit_deadline = Some(Instant::now() + SHUTDOWN_TIMEOUT);
         st.exit_env = st.topbar.as_ref().and_then(|tb| unsafe {
             tb.webview().cast::<ICoreWebView2_2>().ok()?.Environment().ok()?.cast::<ICoreWebView2Environment5>().ok()
