@@ -342,6 +342,162 @@ impl Drop for Staged {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Actualizaciones de las extensiones de las tiendas
+// ---------------------------------------------------------------------------
+//
+// Una vez por dia (si "Buscar actualizaciones" esta encendido) se le pide a la
+// tienda el .crx de cada extension instalada desde ahi, con la misma
+// verificacion que al instalarla (firma, id). Si es mas nueva y no pide
+// permisos nuevos, queda preparada en ".actualizacion-<id>" y se pone en su
+// lugar la proxima vez que se abre Michi, antes de crear ningun WebView
+// (apply_staged_updates): mientras Michi esta abierto WebView2 tiene abiertos
+// los archivos de la extension y no se pueden reemplazar. Si pide permisos
+// nuevos no se instala sola: la barra avisa que hay que volver a agregarla.
+
+/// Prefijo de la carpeta de una actualizacion preparada.
+const UPDATE_PREFIX: &str = ".actualizacion-";
+/// Cuando se busco por ultima vez.
+const UPDATE_STATE_FILE: &str = "extensions_update.json";
+/// Cada cuanto se busca, como mucho.
+const UPDATE_EVERY: u64 = 24 * 60 * 60;
+/// Espera despues de arrancar antes de buscar.
+const UPDATE_DELAY: Duration = Duration::from_secs(90);
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct UpdateState {
+    last_check: u64,
+}
+
+/// Si ya toca buscar de nuevo.
+fn update_due(last_check: u64, now: u64) -> bool {
+    now.saturating_sub(last_check) >= UPDATE_EVERY
+}
+
+/// Si la extension `id` (registrada en `root`) se instalo desde una tienda:
+/// su carpeta es <extensiones>/<id> y el id es de tienda. Las de un .zip o
+/// una carpeta del disco no se buscan en ninguna tienda.
+fn store_installed(id: &str, root: &Path, base: &Path) -> bool {
+    is_extension_id(id)
+        && root.strip_prefix(base).ok().and_then(|rel| rel.components().next()).is_some_and(|c| c.as_os_str() == id)
+}
+
+/// Al arrancar (solo el Michi principal, antes de crear ningun WebView):
+/// pone en su lugar las actualizaciones preparadas.
+pub fn apply_staged_updates() {
+    let reg = registry().lock().map(|r| r.clone()).unwrap_or_default();
+    for id in apply_staged_in(&extensions_dir(), &reg) {
+        eprintln!("[extensiones] actualizada: {id}");
+    }
+}
+
+/// apply_staged_updates en `base`. Devuelve los ids que se actualizaron. Si
+/// una no se pudo poner (un proceso de WebView2 que todavia no termino),
+/// queda preparada para la proxima vez; una que ya no corresponde a ninguna
+/// extension instalada de una tienda se borra.
+fn apply_staged_in(base: &Path, reg: &BTreeMap<String, PathBuf>) -> Vec<String> {
+    let mut updated = Vec::new();
+    let Ok(entries) = std::fs::read_dir(base) else { return updated };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(id) = name.strip_prefix(UPDATE_PREFIX) else { continue };
+        match reg.get(id).filter(|root| store_installed(id, root, base) && root.is_dir()) {
+            Some(root) => match replace_dir(&entry.path(), root, 20, Duration::from_millis(150)) {
+                Ok(()) => updated.push(id.to_string()),
+                Err(e) => eprintln!("[extensiones] no se pudo actualizar {id} ahora ({e}): queda para la proxima"),
+            },
+            None => {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    updated
+}
+
+/// Programa la busqueda diaria de actualizaciones (en otro hilo, un rato
+/// despues de arrancar). Lo que necesita al usuario vuelve como
+/// UserEvent::ExtensionFailed (el aviso de la barra).
+pub fn schedule_update_check(proxy: winit::event_loop::EventLoopProxy<UserEvent>) {
+    std::thread::spawn(move || {
+        std::thread::sleep(UPDATE_DELAY);
+        let settings: storage::Settings = storage::load(storage::SETTINGS_FILE);
+        let saved: UpdateState = storage::load(UPDATE_STATE_FILE);
+        let now = storage::now_secs();
+        if !settings.check_updates || !update_due(saved.last_check, now) {
+            return;
+        }
+        let reg = registry().lock().map(|r| r.clone()).unwrap_or_default();
+        let base = extensions_dir();
+        let mut need_permission = Vec::new();
+        for (id, root) in reg.iter().filter(|(id, root)| store_installed(id, root, &base)) {
+            match stage_update(id, root, &base) {
+                Ok(Staging::NeedsPermission(name)) => need_permission.push(name),
+                Ok(_) => {}
+                Err(e) => eprintln!("[extensiones] buscando una version nueva de {id}: {e}"),
+            }
+        }
+        storage::save(UPDATE_STATE_FILE, &UpdateState { last_check: now });
+        if !need_permission.is_empty() {
+            let _ = proxy.send_event(UserEvent::ExtensionFailed(format!(
+                "Hay una versión nueva de {} que pide más permisos: vuelve a agregarla desde su página en la tienda para aceptarlos.",
+                need_permission.join(", ")
+            )));
+        }
+    });
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Staging {
+    /// Ya es la ultima.
+    UpToDate,
+    /// Preparada: entra la proxima vez que se abra Michi.
+    Staged,
+    /// La nueva pide permisos que la instalada no tenia (su nombre).
+    NeedsPermission(String),
+}
+
+/// Que hacer con la version que entrega la tienda (`new`), comparada con la
+/// instalada (`old`): solo si es mas nueva, y sola solo si no pide nada nuevo.
+fn staging_decision(old: &Value, new: &Value) -> Staging {
+    let version = |m: &Value| version_parts(m.get("version").and_then(Value::as_str).unwrap_or(""));
+    if version(new) <= version(old) {
+        Staging::UpToDate
+    } else if permission_warnings(new) != permission_warnings(old) {
+        Staging::NeedsPermission(String::new())
+    } else {
+        Staging::Staged
+    }
+}
+
+/// Busca en las tiendas una version nueva de `id` y, si corresponde, la deja
+/// preparada (ver el comentario de esta seccion).
+fn stage_update(id: &str, root: &Path, base: &Path) -> Result<Staging, String> {
+    let old = read_manifest(root).ok_or("la extensión instalada no tiene manifest.json")?;
+    // No se guarda de que tienda vino: se prueba en las dos (un id de una no
+    // existe en la otra).
+    let bytes = [Store::Chrome, Store::Edge]
+        .into_iter()
+        .filter_map(|store| download(&crx_url(store, id)).ok())
+        .find(|bytes| crx::verify(bytes).is_ok_and(|p| p.id == id))
+        .ok_or("no se encontró en las tiendas")?;
+    let package = crx::verify(&bytes)?;
+    let staged = Staged::unpack(package.archive)?;
+    let new = read_manifest(&staged.root).ok_or("la versión nueva no tiene manifest.json")?;
+    match staging_decision(&old, &new) {
+        Staging::Staged => {
+            let target = base.join(format!("{UPDATE_PREFIX}{id}"));
+            let _ = std::fs::remove_dir_all(&target);
+            std::fs::rename(&staged.root, &target).map_err(|e| e.to_string())?;
+            Ok(Staging::Staged)
+        }
+        Staging::NeedsPermission(_) => {
+            let name = old.get("name").and_then(Value::as_str).map(|n| localize(root, &old, n)).unwrap_or_else(|| id.into());
+            Ok(Staging::NeedsPermission(name))
+        }
+        other => Ok(other),
+    }
+}
+
 /// Carpetas temporales de instalaciones que no terminaron (el navegador se
 /// cerro con la confirmacion abierta): al arrancar no hay ninguna en curso.
 pub fn clean_staging() {
@@ -901,6 +1057,72 @@ mod tests {
         assert!(version_parts("2.0") > version_parts("1.99.99.99"));
         assert!(version_parts("1.2") < version_parts("1.2.1"));
         assert_eq!(version_parts("1.2.3"), version_parts("1.2.3"));
+    }
+
+    #[test]
+    fn store_extensions_update_themselves_only_when_safe() {
+        assert!(update_due(0, UPDATE_EVERY));
+        assert!(!update_due(100, 100 + UPDATE_EVERY - 1));
+        let base = Path::new("C:/datos/extensions");
+        let id = "cjpalhdlnbpafiamejdnhcphjbkeiagm";
+        assert!(store_installed(id, &base.join(id), base));
+        assert!(store_installed(id, &base.join(id).join("sub"), base));
+        // Las de un .zip o una carpeta del disco, no.
+        assert!(!store_installed("local-123", &base.join("local-123"), base));
+        assert!(!store_installed(id, Path::new("D:/mis-extensiones/x"), base));
+        assert!(!store_installed(id, &base.join("otra"), base));
+
+        let m = |v: &str, perms: Value| json!({ "version": v, "permissions": perms });
+        assert_eq!(staging_decision(&m("1.2", json!(["storage"])), &m("1.3", json!(["storage"]))), Staging::Staged);
+        assert_eq!(staging_decision(&m("1.3", json!([])), &m("1.3", json!([]))), Staging::UpToDate);
+        // Nunca una mas vieja.
+        assert_eq!(staging_decision(&m("2.0", json!([])), &m("1.9", json!([]))), Staging::UpToDate);
+        // Permisos nuevos: no sola.
+        assert!(matches!(
+            staging_decision(&m("1.0", json!(["storage"])), &m("1.1", json!(["storage", "<all_urls>"]))),
+            Staging::NeedsPermission(_)
+        ));
+    }
+
+    /// Busca de verdad una version nueva de uBlock Origin Lite para una copia
+    /// "vieja" instalada y la deja preparada (usa la red: `cargo test -- --ignored`).
+    #[test]
+    #[ignore]
+    fn stages_a_real_update_from_the_store() {
+        let dir = storage::test_dir::TempDataDir::new("act-real");
+        let base = extensions_dir();
+        let id = "ddkjiahejlhfcafbddmgiahcphecmpfh";
+        std::fs::create_dir_all(base.join(id)).unwrap();
+        // Los mismos permisos no se saben de antemano: con ninguno, la nueva
+        // pide mas y no se prepara sola; sin el campo, la decision la da la version.
+        std::fs::write(base.join(id).join("manifest.json"), r#"{"name":"uBO Lite","version":"0.0.1"}"#).unwrap();
+        let result = stage_update(id, &base.join(id), &base).unwrap();
+        match result {
+            Staging::Staged => assert!(base.join(format!("{UPDATE_PREFIX}{id}")).join("manifest.json").is_file()),
+            Staging::NeedsPermission(name) => assert_eq!(name, "uBO Lite"),
+            Staging::UpToDate => panic!("0.0.1 no puede ser la ultima"),
+        }
+        drop(dir);
+    }
+
+    #[test]
+    fn staged_updates_are_put_in_place_at_startup() {
+        let base = std::env::temp_dir().join(format!("michi-prueba-act-{}-{}", std::process::id(), unix_millis()));
+        let id = "cjpalhdlnbpafiamejdnhcphjbkeiagm";
+        let gone = "aaaabbbbccccddddeeeeffffgggghhhh";
+        std::fs::create_dir_all(base.join(id)).unwrap();
+        std::fs::write(base.join(id).join("manifest.json"), "1").unwrap();
+        std::fs::create_dir_all(base.join(format!("{UPDATE_PREFIX}{id}"))).unwrap();
+        std::fs::write(base.join(format!("{UPDATE_PREFIX}{id}")).join("manifest.json"), "2").unwrap();
+        // Una preparada de una extension que ya se quito.
+        std::fs::create_dir_all(base.join(format!("{UPDATE_PREFIX}{gone}"))).unwrap();
+        let mut reg = BTreeMap::new();
+        reg.insert(id.to_string(), base.join(id));
+        assert_eq!(apply_staged_in(&base, &reg), vec![id.to_string()]);
+        assert_eq!(std::fs::read_to_string(base.join(id).join("manifest.json")).unwrap(), "2");
+        assert!(!base.join(format!("{UPDATE_PREFIX}{id}")).exists());
+        assert!(!base.join(format!("{UPDATE_PREFIX}{gone}")).exists());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

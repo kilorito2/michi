@@ -440,12 +440,16 @@ fn main() {
     if wry::webview_version().is_err() {
         fatal(WEBVIEW2_MISSING);
     }
+    // Solo el principal llega aca, y todavia sin ningun WebView: las
+    // extensiones preparadas se pueden reemplazar (ver extensions.rs).
+    extensions::apply_staged_updates();
     std::thread::spawn(extensions::clean_staging);
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .expect("no se pudo crear el event loop");
     single_instance::listen(event_loop.create_proxy());
     control::listen(event_loop.create_proxy());
+    extensions::schedule_update_check(event_loop.create_proxy());
     let mut app = App::new(event_loop.create_proxy());
     event_loop.run_app(&mut app).expect("fallo el bucle de eventos");
 }

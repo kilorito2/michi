@@ -242,6 +242,10 @@ que la extensión va a poder hacer:
 > - Leer y cambiar todos tus datos en todos los sitios web
 > - Bloquear o cambiar contenido de las páginas
 
+Las que vienen de una tienda **se mantienen al día solas**: una vez por día se
+busca su versión nueva (verificada igual) y entra la próxima vez que abres
+Michi; si pide más permisos, Michi te avisa en lugar de instalarla.
+
 Las que tienen ventana propia aparecen como un icono en la barra superior; su
 popup se abre flotando debajo, como en Chrome, y actúa sobre la pestaña que
 estás viendo.
@@ -541,6 +545,7 @@ que abres:
 | Las direcciones que visitas y lo que descargas | Microsoft (SmartScreen) | Avisar de phishing y malware | Ajustes › Privacidad |
 | Una consulta a la API de GitHub (sin datos tuyos) | GitHub | Saber si hay una versión nueva | Ajustes › Acerca de |
 | El pedido de la extensión que instalas | Chrome Web Store o Complementos de Edge | Instalarla | (solo cuando instalas una) |
+| Una vez por día, el id de cada extensión instalada desde una tienda | Chrome Web Store y Complementos de Edge | Saber si hay una versión nueva | Ajustes › Acerca de (el mismo interruptor que las actualizaciones de Michi) |
 
 El motor, Microsoft Edge WebView2, es parte de Windows y se actualiza con
 Windows Update; sus datos de diagnóstico siguen lo que elijas en *Configuración
@@ -896,9 +901,13 @@ respondía a CSS, así que se optó por un color sólido.
   directamente). Ver la nota de la sección [Instalador](#instalador).
 - **Extensiones sin popup** (las que hacen algo directo al tocar su icono) no
   aparecen en la barra: WebView2 no permite disparar ese evento desde afuera.
-- **Las extensiones no se actualizan solas**: para tener la versión nueva de
-  una extensión de la tienda, vuelve a tocar **Agregar a Michi** en su página
-  (se reemplaza la instalada y nunca por una más vieja).
+- **Las extensiones se actualizan al volver a abrir Michi**: una vez por día se
+  busca la versión nueva de las que instalaste desde una tienda, con la misma
+  verificación de firma, y entra la próxima vez que abres Michi (mientras está
+  abierto, WebView2 tiene sus archivos en uso). Si la versión nueva pide más
+  permisos no se instala sola: la barra avisa y hay que volver a tocar
+  **Agregar a Michi** en su página para aceptarlos. Las instaladas desde un
+  `.zip` o una carpeta no se actualizan.
 - **SmartScreen depende de Windows**: si *SmartScreen para Microsoft Edge* está
   apagado en Seguridad de Windows, WebView2 no lo usa.
 - **Mezcladores de audio de terceros** (SteelSeries Sonar y similares) pueden
