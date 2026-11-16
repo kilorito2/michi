@@ -401,13 +401,25 @@ fn on_navigation_starting(state: &Shared, core: &ICoreWebView2, id: u64) {
             unsafe { args.SetCancel(true)? };
             return Ok(());
         }
-        if https_first(&s, id, &uri, nav_id, redirected.as_bool(), new_document) {
+        // Un formulario enviado (POST) trae Content-Type en la navegacion; un
+        // enlace o una direccion escrita (GET), no. Comprobado con WebView2.
+        let has_body = unsafe { args.RequestHeaders() }.is_ok_and(|h| {
+            let mut has = BOOL(0);
+            unsafe { h.Contains(&windows_core::HSTRING::from("Content-Type"), &mut has) }.is_ok() && has.as_bool()
+        });
+        if https_first(&s, id, &uri, nav_id, redirected.as_bool(), may_upgrade(new_document, has_body)) {
             unsafe { args.SetCancel(true)? };
         }
         Ok(())
     }));
     let mut token = 0i64;
     let _ = unsafe { core.add_NavigationStarting(&handler, &mut token) };
+}
+
+/// Si una navegacion a http:// se puede desviar a HTTPS (ver https_first):
+/// nueva (no atras/adelante/recargar) y sin cuerpo (no un formulario POST).
+pub fn may_upgrade(new_document: bool, has_body: bool) -> bool {
+    new_document && !has_body
 }
 
 /// Michi va a llevar la pestana `id` a `url` (no la pagina que muestra): si
@@ -472,7 +484,13 @@ pub fn leaves_insecure_page(old: &str, new: &str) -> bool {
 
 /// Decide una navegacion que arranca (ver on_navigation_starting). Devuelve
 /// si hay que cancelarla.
-fn https_first(state: &Shared, id: u64, uri: &str, nav_id: u64, redirected: bool, new_document: bool) -> bool {
+///
+/// `may_upgrade`: es una navegacion nueva y sin cuerpo. Atras/adelante/recargar
+/// no se desvian (esa entrada ya se abrio antes), y un formulario enviado por
+/// POST tampoco: el desvio cancela la navegacion y abre la direccion por
+/// HTTPS con un GET, asi que los datos del formulario se perdian. Ese POST
+/// sale por HTTP como lo pidio la pagina (la barra lo marca como no seguro).
+fn https_first(state: &Shared, id: u64, uri: &str, nav_id: u64, redirected: bool, may_upgrade: bool) -> bool {
     enum Step {
         Allow,
         /// Cancelar y probar por HTTPS.
@@ -506,7 +524,7 @@ fn https_first(state: &Shared, id: u64, uri: &str, nav_id: u64, redirected: bool
                 sec.upgrade = None;
             }
         }
-        if matches!(step, Step::Allow) && mode != "off" && new_document {
+        if matches!(step, Step::Allow) && mode != "off" && may_upgrade {
             if let Some((host, https_url)) = https_upgrade(uri) {
                 if !st.http_allowed.contains(&host) {
                     step = Step::Upgrade(host, https_url);
@@ -1207,6 +1225,14 @@ mod tests {
         assert!(!popup_target_allowed(ext, web));
         assert!(popup_target_allowed(ext, "chrome-extension://abcdefghijklmnopabcdefghijklmnop/popup.html"));
         assert!(!popup_target_allowed(ext, "chrome-extension://ppppppppppppppppppppppppppppppp/x.html"));
+    }
+
+    #[test]
+    fn forms_sent_by_post_are_not_redirected_to_https() {
+        assert!(may_upgrade(true, false));
+        assert!(!may_upgrade(true, true));
+        assert!(!may_upgrade(false, false));
+        assert!(!may_upgrade(false, true));
     }
 
     #[test]
