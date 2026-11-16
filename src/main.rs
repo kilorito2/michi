@@ -89,7 +89,10 @@ impl ApplicationHandler<UserEvent> for App {
             .with_blur(true);
         let attrs = with_app_icon(attrs);
 
-        let window = event_loop.create_window(attrs).expect("no se pudo crear la ventana");
+        let window = match event_loop.create_window(attrs) {
+            Ok(window) => window,
+            Err(e) => fatal(&format!("No se pudo crear la ventana de Michi ({e}).")),
+        };
         win::fit_maximize_to_work_area(&window);
         win::remember_main_window(&window);
         self.state.borrow_mut().window = Some(Rc::new(window));
@@ -100,7 +103,10 @@ impl ApplicationHandler<UserEvent> for App {
         security::forget_leftover_traces(&self.state);
         open_startup_tabs(&self.state);
 
-        let topbar = chrome::build_topbar(&self.state);
+        let topbar = match chrome::build_topbar(&self.state) {
+            Ok(topbar) => topbar,
+            Err(e) => fatal(&format!("{WEBVIEW2_MISSING}\n\n(Detalle: {e})")),
+        };
         let left = chrome::build_left_panel(&self.state);
         let right = chrome::build_right_panel(&self.state);
         let menu = menu::build(&self.state);
@@ -396,6 +402,24 @@ fn install_crash_log() {
     }));
 }
 
+/// Lo que dice Michi si no puede usar Microsoft Edge WebView2 Runtime.
+const WEBVIEW2_MISSING: &str = "Michi necesita Microsoft Edge WebView2 Runtime, que viene con Windows 11 y con casi \
+     todos los Windows 10, y no se pudo usar en esta PC.\n\nDescárgalo e instálalo desde la página de Microsoft:\n\
+     https://developer.microsoft.com/microsoft-edge/webview2/\n\nDespués vuelve a abrir Michi.";
+
+/// Un error con el que Michi no puede arrancar: lo dice en un cuadro nativo y
+/// se cierra (antes era un panico sin ventana: Michi "no abria" y nada mas).
+fn fatal(message: &str) -> ! {
+    eprintln!("[michi] {message}");
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("Michi")
+        .set_description(message)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+    std::process::exit(1)
+}
+
 fn main() {
     recovery::mark_start();
     // Antes que nada: que ninguna DLL se cargue desde un lugar inseguro.
@@ -410,6 +434,10 @@ fn main() {
     storage::migrate_old_data();
     storage::migrate_old_profile();
     install_crash_log();
+    // Antes de abrir nada: sin WebView2 no hay ventana posible.
+    if wry::webview_version().is_err() {
+        fatal(WEBVIEW2_MISSING);
+    }
     std::thread::spawn(extensions::clean_staging);
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()

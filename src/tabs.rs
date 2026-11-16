@@ -490,11 +490,17 @@ pub fn activated(state: &Shared) {
 
 pub fn close_tab(state: &Shared, id: u64) {
     let should_reopen;
+    // La pestana sale del estado aca, pero su WebView se destruye recien al
+    // final del bloque de abajo, con el prestamo de `state` ya suelto:
+    // destruirlo dispara eventos de WebView2 (foco, procesos) que vuelven a
+    // pedir `state`, y con el prestamo tomado eso era un panico (RefCell ya
+    // prestado). Lo mismo hace security::shutdown.
+    let closed;
     {
         let mut st = state.borrow_mut();
         let Some(i) = st.tabs.iter().position(|t| t.id == id) else { return };
         let was_active = st.active;
-        let closed = st.tabs.remove(i);
+        closed = st.tabs.remove(i);
         // Una de incognito no se puede reabrir: seria un rastro de lo que se vio.
         if !is_new_tab_url(&closed.url) && !closed.incognito {
             st.closed_tabs.push(closed.url.clone());
@@ -508,6 +514,7 @@ pub fn close_tab(state: &Shared, id: u64) {
             st.active = if i < was_active { was_active - 1 } else { was_active.min(st.tabs.len() - 1) };
         }
     }
+    drop(closed);
 
     if should_reopen {
         state.borrow_mut().request_tab(HOME_URL);

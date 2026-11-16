@@ -10,8 +10,13 @@
 //! Los nombres del mutex y del pipe llevan un hash de la ruta del .exe: cada
 //! instalacion (y cada compilacion de prueba) es su propio "un solo Michi".
 //! El pipe es solo de este usuario de Windows (ver pipes.rs).
-
-use std::hash::{Hash, Hasher};
+//!
+//! El mutex es "Global" y lleva el SID del usuario, como el pipe: los dos
+//! valen para todas las sesiones de Windows de ese usuario. Antes el mutex era
+//! de la sesion ("Local") y el pipe de toda la PC: con el mismo usuario en
+//! dos sesiones (escritorio remoto y la consola), el de la segunda se creia
+//! principal, no podia crear el pipe (lo tenia el de la primera) y reintentaba
+//! cada segundo para siempre. Ahora le pasa lo pedido al de la otra sesion.
 
 use winit::event_loop::EventLoopProxy;
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY, INVALID_HANDLE_VALUE};
@@ -36,12 +41,23 @@ fn wide(s: &str) -> Vec<u16> {
 
 /// Identificador de esta instalacion: hash de la ruta del .exe.
 pub fn install_id() -> u64 {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    std::env::current_exe()
-        .map(|p| p.to_string_lossy().to_lowercase())
-        .unwrap_or_default()
-        .hash(&mut h);
-    h.finish()
+    install_id_for(&std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
+}
+
+/// install_id de la ruta `exe`: los primeros 8 bytes del SHA-256 de la ruta en
+/// minusculas. Antes era DefaultHasher, que no promete dar lo mismo entre
+/// versiones de Rust: un Michi compilado con otra version no encontraba al
+/// principal (ni May el pipe de control).
+fn install_id_for(exe: &str) -> u64 {
+    let digest = ring::digest::digest(&ring::digest::SHA256, exe.to_lowercase().as_bytes());
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&digest.as_ref()[..8]);
+    u64::from_be_bytes(bytes)
+}
+
+/// Nombre del mutex de "un solo Michi" (ver el comentario del modulo).
+fn mutex_name(id: u64, sid: &str) -> String {
+    format!("Global\\Michi-{id:016x}-{sid}")
 }
 
 fn pipe_name() -> String {
@@ -66,7 +82,10 @@ pub fn is_external_target(url: &str) -> bool {
 /// devuelve true. Si el principal no contesta (se esta cerrando, colgado), se
 /// devuelve true igual: mejor otra ventana que un enlace que "no hace nada".
 pub fn claim(url: Option<&str>) -> bool {
-    let name = wide(&format!("Local\\Michi-{:016x}", install_id()));
+    // Si otra cuenta de la PC creo antes un mutex con este nombre, se toma como
+    // que hay un principal; pero su pipe no es de este usuario (ver forward) y
+    // este pasa a ser el principal igual.
+    let name = wide(&mutex_name(install_id(), crate::pipes::user_sid()));
     // Reabriendose despues de que se cayo WebView2 (ver recovery.rs): el Michi
     // anterior esta terminando, y hay que esperar a que suelte el mutex en vez
     // de pasarle lo pedido a el.
@@ -204,6 +223,15 @@ mod tests {
             Some(UserEvent::OpenExternal(url)) => Some(url),
             _ => None,
         }
+    }
+
+    #[test]
+    fn the_install_id_is_stable_and_names_are_per_user() {
+        // Fijo: no puede cambiar con la version de Rust (ver install_id_for).
+        assert_eq!(install_id_for("C:/Programas/Michi/michi.exe"), 0xb0b8d4fc5b9d1a9b);
+        assert_eq!(install_id_for("c:/programas/michi/michi.exe"), 0xb0b8d4fc5b9d1a9b);
+        assert_ne!(install_id_for("D:/otra/michi.exe"), 0xb0b8d4fc5b9d1a9b);
+        assert_eq!(mutex_name(0xab, "S-1-5-21-1"), "Global\\Michi-00000000000000ab-S-1-5-21-1");
     }
 
     #[test]

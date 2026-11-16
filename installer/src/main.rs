@@ -466,19 +466,36 @@ fn relocate(dir: &PathBuf) -> bool {
 /// Al salir: borra la carpeta temporal de WebView2 del instalador y, si es la
 /// copia temporal del desinstalador, a si misma (cuando ya termino).
 fn clean_up_later(webview_dir: &std::path::Path, delete_self: bool) {
-    let mut cmd = format!("/C ping 127.0.0.1 -n 3 >nul & rmdir /s /q \"{}\"", webview_dir.display());
-    if delete_self {
-        // Solo si de verdad es la copia temporal que hizo relocate (nunca,
-        // por ejemplo, el instalador original lanzado con --temp a mano).
-        let copy = std::env::current_exe().ok().filter(|exe| {
-            exe.parent() == Some(std::env::temp_dir().as_path())
-                && exe.file_name().is_some_and(|n| n.to_string_lossy().starts_with("michi-desinstalar-"))
-        });
-        if let Some(exe) = copy {
-            cmd.push_str(&format!(" & del /f /q \"{}\"", exe.display()));
-        }
+    // Solo si de verdad es la copia temporal que hizo relocate (nunca, por
+    // ejemplo, el instalador original lanzado con --temp a mano).
+    let copy = std::env::current_exe().ok().filter(|exe| {
+        delete_self
+            && exe.parent() == Some(std::env::temp_dir().as_path())
+            && exe.file_name().is_some_and(|n| n.to_string_lossy().starts_with("michi-desinstalar-"))
+    });
+    let _ = cleanup_command(webview_dir, copy.as_deref(), true).spawn();
+}
+
+/// El cmd que borra `dir` y, si se pide, `exe` (un instante despues, cuando
+/// este proceso ya termino: `wait`). Las rutas NO van en la linea de comandos:
+/// cmd expande %VARIABLE% aun entre comillas, y una carpeta temporal con un %
+/// en el nombre (el de un usuario de Windows, por ejemplo) cambiaba lo que se
+/// borraba. Van en variables de entorno: su valor se expande una sola vez y,
+/// entre comillas, ni un % ni un & del valor se interpretan.
+fn cleanup_command(dir: &std::path::Path, exe: Option<&std::path::Path>, wait: bool) -> std::process::Command {
+    let mut line = String::from("/C ");
+    if wait {
+        line.push_str("ping 127.0.0.1 -n 3 >nul & ");
     }
-    let _ = std::process::Command::new("cmd").raw_arg(cmd).creation_flags(CREATE_NO_WINDOW).spawn();
+    line.push_str("rmdir /s /q \"%MICHI_LIMPIAR_DIR%\"");
+    let mut cmd = std::process::Command::new("cmd");
+    cmd.env("MICHI_LIMPIAR_DIR", dir);
+    if let Some(exe) = exe {
+        line.push_str(" & del /f /q \"%MICHI_LIMPIAR_EXE%\"");
+        cmd.env("MICHI_LIMPIAR_EXE", exe);
+    }
+    cmd.raw_arg(line).creation_flags(CREATE_NO_WINDOW);
+    cmd
 }
 
 fn main() {
@@ -539,4 +556,27 @@ fn main() {
     let _ = event_loop.run_app(&mut app);
     drop(app);
     clean_up_later(&webview_dir, delete_self);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_deletes_exactly_the_paths_even_with_percent_and_ampersand() {
+        let base = std::env::temp_dir().join(format!("michi-prueba-limpiar-{}", std::process::id()));
+        // Un nombre con lo que cmd interpretaria si fuera en la linea de comandos.
+        let dir = base.join("a %PATH% & b");
+        let exe = base.join("x%TEMP%&.exe");
+        let keep = base.join("PATH");
+        std::fs::create_dir_all(dir.join("adentro")).unwrap();
+        std::fs::create_dir_all(&keep).unwrap();
+        std::fs::write(&exe, b"MZ").unwrap();
+        let status = cleanup_command(&dir, Some(&exe), false).status().unwrap();
+        assert!(status.success());
+        assert!(!dir.exists());
+        assert!(!exe.exists());
+        assert!(keep.exists());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }

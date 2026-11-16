@@ -25,7 +25,9 @@ use crate::state::{Shared, EDGE_IDLE, PANEL_W, TOPBAR_H};
 /// encima, asi que no necesita la transparencia de la ventana.
 pub const PANEL_BG: (u8, u8, u8, u8) = (18, 17, 31, 255);
 
-pub fn build_topbar(state: &Shared) -> WebView {
+/// Es el primer WebView de la interfaz: si falla, Michi no puede seguir y lo
+/// dice (ver main::fatal) en vez de cerrarse sin explicacion.
+pub fn build_topbar(state: &Shared) -> wry::Result<WebView> {
     let window = state
         .borrow()
         .window
@@ -46,7 +48,6 @@ pub fn build_topbar(state: &Shared) -> WebView {
             crate::ipc::dispatch(&s, &req.uri().to_string(), req.body());
         })
         .build_as_child(window.as_ref())
-        .expect("no se pudo crear la barra superior")
 }
 
 pub fn build_right_panel(state: &Shared) -> WebView {
