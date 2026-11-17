@@ -207,6 +207,13 @@ pestañas que reproducen sonido o video, las que están cargando, las páginas p
 de Michi ni la que está en pantalla completa. Los modos viven en `src/perf.rs` y
 `ui/wallpaper.js`.
 
+Al **restaurar la sesión**, solo se abre la pestaña que estaba al frente: las
+demás aparecen en el panel con su título y su logo, y cargan recién cuando entras
+a ellas (con muchas pestañas, abrir Michi ya no carga todas las páginas
+guardadas). En el modo **Normal** hay además una **pestaña nueva de repuesto**, ya
+cargada y oculta, para que **Ctrl+T** y **+** sean instantáneos; cuesta un proceso
+más en memoria, así que los otros modos no la usan.
+
 ### <img src="docs/icons/importar.svg" width="22" height="22" alt=""> Importar de otro navegador
 
 En **Ajustes › Importar**, Michi detecta los navegadores instalados en la PC y
@@ -825,9 +832,12 @@ sirve los originales 4K de `assets/wallpapers/`, sino las versiones de
 
 - `<tema>.mp4`: 1920×1080 a 60 fps (los originales a 30 fps se interpolan), para
   la pestaña nueva.
-- `<tema>.blur.mp4`: 640×360 a 60 fps con el desenfoque y la saturación del
+- `<tema>.blur.mp4`: 320×180 a 30 fps con el desenfoque y la saturación del
   vidrio ya aplicados, para la barra y los paneles (antes lo hacía
-  `backdrop-filter` en cada cuadro).
+  `backdrop-filter` en cada cuadro). Con el desenfoque horneado no se distingue
+  de uno más grande o más fluido, y la barra y los dos paneles lo decodifican a
+  la vez todo el tiempo. Dura exactamente lo mismo que el de 1080p (el script lo
+  comprueba): si no, las superficies se desincronizan.
 
 `protocol.rs` lee solo el rango pedido por el `<video>`, en un hilo aparte.
 `ui/wallpaper.js` sincroniza todas las superficies con el reloj del sistema (para

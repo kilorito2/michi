@@ -48,6 +48,9 @@ fn rect(win_w: f64) -> Rect {
 /// Muestra el aviso para `host` (el sitio de la pestana que paso a pantalla
 /// completa; "" = no tiene, como un archivo local).
 pub fn show(state: &Shared, host: &str) {
+    // Si todavia no se creo (ver main::build_deferred_ui): este aviso no
+    // puede faltar nunca.
+    crate::chrome::ensure(state, crate::state::UiPiece::Notice);
     {
         let mut st = state.borrow_mut();
         let Some(window) = st.window.clone() else { return };

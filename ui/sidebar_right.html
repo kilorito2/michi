@@ -288,34 +288,64 @@
     return b;
   }
 
+  // Lo ya dibujado, por clave ("r"+id fila, "t"+id fijada, "g"+id
+  // encabezado): con su firma (todo lo que se uso para dibujarlo). Si no
+  // cambio se reusa tal cual. Antes se borraba y se rearmaba la lista entera
+  // en cada aviso (cada titulo, cada carga de cada pestana), con su logo
+  // decodificado de nuevo.
+  let drawn = new Map();
+
   function render(data) {
     tabs = data.tabs;
     groups = data.groups || [];
     colors = data.colors || colors;
-    list.innerHTML = '';
-    pinnedEl.innerHTML = '';
+    const next = new Map();
+    const pinnedEls = [];
+    const listEls = [];
+    function reuse(key, sig, make) {
+      const old = drawn.get(key);
+      const el = old && old.sig === sig ? old.el : make();
+      next.set(key, { sig, el });
+      return el;
+    }
     let current = null;
     tabs.forEach((t) => {
       if (t.pinned) {
-        const el = tile(t);
-        el.dataset.id = t.id;
-        wire(el, t);
-        pinnedEl.appendChild(el);
+        pinnedEls.push(reuse('t' + t.id, JSON.stringify(t), () => {
+          const el = tile(t);
+          el.dataset.id = t.id;
+          wire(el, t);
+          return el;
+        }));
         return;
       }
       const g = t.group != null ? groupOf(t.group) : null;
       if (g && current !== g.id) {
         current = g.id;
-        list.appendChild(groupHead(g, t.id));
+        const count = tabs.filter((x) => x.group === g.id).length;
+        listEls.push(reuse('g' + g.id, JSON.stringify([g, t.id, count]), () => groupHead(g, t.id)));
       } else if (!g) {
         current = null;
       }
       if (g && g.collapsed) return;
-      const el = row(t, g);
-      el.dataset.id = t.id;
-      wire(el, t);
-      list.appendChild(el);
+      listEls.push(reuse('r' + t.id, JSON.stringify([t, g]), () => {
+        const el = row(t, g);
+        el.dataset.id = t.id;
+        wire(el, t);
+        return el;
+      }));
     });
+    drawn = next;
+    sync(pinnedEl, pinnedEls);
+    sync(list, listEls);
+  }
+
+  // Deja en `box` exactamente `els`, en ese orden, moviendo solo lo que hace falta.
+  function sync(box, els) {
+    els.forEach((el, i) => {
+      if (box.children[i] !== el) box.insertBefore(el, box.children[i] || null);
+    });
+    while (box.children.length > els.length) box.lastChild.remove();
   }
 
   function groupHead(g, firstId) {
@@ -473,6 +503,9 @@
       if (done) return;
       done = true;
       renaming = null;
+      // El encabezado tiene el campo en vez del nombre: se dibuja de nuevo
+      // aunque el grupo no cambie (ver render).
+      drawn.delete('g' + groupId);
       ipc('editing_right', { value: false });
       if (save) ipc('update_group', { group: groupId, name: input.value });
       else if (pendingTabs == null) pendingTabs = { tabs, groups, colors };

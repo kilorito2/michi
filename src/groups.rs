@@ -57,9 +57,7 @@ pub fn normalize(st: &mut AppState) {
     if let Some(i) = active_id.and_then(|a| st.tabs.iter().position(|t| t.id == a)) {
         st.active = i;
     }
-    // Tambien los de las pestanas que todavia se estan restaurando (ver
-    // tabs::restore_next): su grupo existe aunque aun no tenga ninguna.
-    let used: Vec<u64> = st.tabs.iter().filter_map(|t| t.group).chain(st.restore_queue.iter().filter_map(|r| r.group)).collect();
+    let used: Vec<u64> = st.tabs.iter().filter_map(|t| t.group).collect();
     st.groups.retain(|g| used.contains(&g.id));
 }
 
@@ -223,8 +221,8 @@ pub fn close(state: &Shared, group: u64) {
 }
 
 /// Al restaurar la sesion: arma los grupos guardados y devuelve sus ids (en
-/// el orden de `session.groups`). Las pestanas entran despues, de a una (ver
-/// tabs::restore_next).
+/// el orden de `session.groups`). Las pestanas entran despues (ver
+/// main::open_startup_tabs).
 pub fn create_saved(state: &Shared, saved: &[crate::storage::SavedGroup]) -> Vec<u64> {
     let mut st = state.borrow_mut();
     saved

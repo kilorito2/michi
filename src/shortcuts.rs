@@ -102,8 +102,8 @@ pub fn restore_focus(state: &Shared) {
     let moved = owner
         .is_some_and(|c| unsafe { c.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) }.is_ok());
     if !moved {
-        if let Some(t) = state.borrow().active_tab() {
-            let _ = t.webview.focus();
+        if let Some(wv) = state.borrow().active_tab().and_then(|t| t.webview.as_ref()) {
+            let _ = wv.focus();
         }
     }
 }

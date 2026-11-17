@@ -525,9 +525,15 @@ fn find(state: &Shared, tab: Option<u64>) -> Option<usize> {
 /// usarlo (navegar dispara eventos que lo vuelven a pedir).
 fn core_of(state: &Shared, tab: Option<u64>) -> Option<(u64, webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2)> {
     let i = find(state, tab)?;
+    let id = state.borrow().tabs[i].id;
+    // Una de la sesion que todavia no se abrio (ver Tab::webview): se abre
+    // ahora (esto corre en el bucle de eventos, no en un callback de WebView2).
+    if !crate::tabs::ensure_loaded(state, id) {
+        return None;
+    }
     let st = state.borrow();
-    let t = &st.tabs[i];
-    Some((t.id, t.webview.webview()))
+    let t = st.tabs.iter().find(|t| t.id == id)?;
+    Some((t.id, t.webview.as_ref()?.webview()))
 }
 
 fn call_cdp(

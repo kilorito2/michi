@@ -11,6 +11,54 @@ use crate::state::{
 };
 use crate::{extensions, menu, native, perf, permissions, protocol, security, storage, tabs};
 
+/// Lo que se puede dejar para la proxima vuelta del bucle (ver mark).
+pub const TABS: u8 = 1;
+pub const ACTIVE_TAB: u8 = 2;
+pub const HISTORY: u8 = 4;
+pub const MEDIA: u8 = 8;
+
+/// Anota que hay que reenviar `what` a la interfaz, y sale todo junto en la
+/// proxima vuelta del bucle de eventos (ver flush). Cada cambio de titulo o
+/// de carga de cada pestana mandaba la lista entera de pestanas, la barra y
+/// el historial en el momento: con muchas pestanas cargando a la vez (o
+/// una pagina que cambia el titulo seguido) eran decenas de envios por
+/// segundo que la interfaz redibujaba enteros.
+pub fn mark(state: &Shared, what: u8) {
+    let st = state.borrow();
+    let d = &st.dirty;
+    let was = d.tabs.get() || d.active_tab.get() || d.history.get() || d.media.get();
+    for (bit, flag) in [(TABS, &d.tabs), (ACTIVE_TAB, &d.active_tab), (HISTORY, &d.history), (MEDIA, &d.media)] {
+        if what & bit != 0 {
+            flag.set(true);
+        }
+    }
+    // Un solo aviso hasta que se envie.
+    if !was {
+        st.wake();
+    }
+}
+
+/// Envia lo anotado con mark. Lo llama el bucle de eventos en cada vuelta.
+pub fn flush(state: &Shared) {
+    let (tabs, active, history, media) = {
+        let st = state.borrow();
+        let d = &st.dirty;
+        (d.tabs.replace(false), d.active_tab.replace(false), d.history.replace(false), d.media.replace(false))
+    };
+    if media {
+        push_media(state);
+    }
+    if history {
+        push_history(state);
+    }
+    if active {
+        push_active_tab(state);
+    }
+    if tabs {
+        push_tabs(state);
+    }
+}
+
 pub fn push_tabs(state: &Shared) {
     let st = state.borrow();
     let data: Vec<_> = st
@@ -55,8 +103,8 @@ pub fn push_active_tab(state: &Shared) {
     let st = state.borrow();
     let Some(tab) = st.tabs.get(st.active) else { return };
 
-    let can_back = tab.webview.can_go_back().unwrap_or(false);
-    let can_fwd = tab.webview.can_go_forward().unwrap_or(false);
+    let can_back = tab.webview.as_ref().and_then(|w| w.can_go_back().ok()).unwrap_or(false);
+    let can_fwd = tab.webview.as_ref().and_then(|w| w.can_go_forward().ok()).unwrap_or(false);
 
     // En la pagina de aviso de HTTPS la barra muestra el sitio pendiente (y
     // que no es seguro), no la direccion interna del aviso; en la de "dejo
@@ -160,10 +208,8 @@ pub fn push_wallpaper(state: &Shared) {
         let (x, y) = st.suggest.pos;
         let _ = s.evaluate_script(&call(x, y));
     }
-    for tab in &st.tabs {
-        if is_own_page(&tab.url) {
-            let _ = tab.webview.evaluate_script(&call(EDGE_IDLE, TOPBAR_H));
-        }
+    for wv in own_page_views(&st) {
+        let _ = wv.evaluate_script(&call(EDGE_IDLE, TOPBAR_H));
     }
 }
 
@@ -185,6 +231,18 @@ pub fn push_media(state: &Shared) {
         st.wallpaper_frozen = frozen;
         frozen
     };
+    send_frozen(state, frozen);
+}
+
+/// Lo mismo, sin mirar si cambio: para una pagina de la interfaz que recien
+/// se anuncia (puede haber nacido despues de que se congelo el fondo, ver
+/// main::build_deferred_ui).
+pub fn push_media_now(state: &Shared) {
+    let frozen = state.borrow().wallpaper_frozen;
+    send_frozen(state, frozen);
+}
+
+fn send_frozen(state: &Shared, frozen: bool) {
     let st = state.borrow();
     let js = format!("window.__setWallpaperFrozen && window.__setWallpaperFrozen({frozen})");
     for view in [&st.topbar, &st.left_panel, &st.right_panel, &st.menu, &st.suggest.view].into_iter().flatten() {
@@ -201,17 +259,24 @@ pub fn push_perf(state: &Shared) {
     for view in [&st.topbar, &st.left_panel, &st.right_panel, &st.menu, &st.suggest.view].into_iter().flatten() {
         let _ = view.evaluate_script(&js);
     }
-    for tab in st.tabs.iter().filter(|t| is_own_page(&t.url)) {
-        let _ = tab.webview.evaluate_script(&js);
+    for wv in own_page_views(&st) {
+        let _ = wv.evaluate_script(&js);
     }
+}
+
+/// Los WebView de las pestanas que muestran una pagina propia (las que
+/// todavia no se abrieron no tienen: ver Tab::webview), con la de repuesto:
+/// asi ya tiene el fondo y los ajustes cuando se la usa (ver tabs::adopt_spare).
+fn own_page_views(st: &crate::state::AppState) -> impl Iterator<Item = &wry::WebView> {
+    st.tabs.iter().chain(&st.spare).filter(|t| is_own_page(&t.url)).filter_map(|t| t.webview.as_ref())
 }
 
 /// La pagina propia de esa pestana (la pestana nueva) se entera de que es de
 /// incognito, para decirlo.
 pub fn push_incognito(state: &Shared, tab_id: u64) {
     let st = state.borrow();
-    if let Some(tab) = st.tabs.iter().find(|t| t.id == tab_id && t.incognito && is_own_page(&t.url)) {
-        let _ = tab.webview.evaluate_script("window.onIncognito && window.onIncognito(true)");
+    if let Some(wv) = st.tabs.iter().find(|t| t.id == tab_id && t.incognito && is_own_page(&t.url)).and_then(|t| t.webview.as_ref()) {
+        let _ = wv.evaluate_script("window.onIncognito && window.onIncognito(true)");
     }
 }
 
@@ -272,7 +337,7 @@ pub fn push_menu(state: &Shared) {
     let Some(m) = &st.menu else { return };
     let (zoom, can_bookmark, bookmarked) = match st.active_tab() {
         Some(t) => (
-            native::zoom(&t.webview),
+            t.webview.as_ref().map_or(1.0, native::zoom),
             tabs::is_bookmarkable(&t.url),
             st.bookmarks.iter().any(|b| b.url == t.url),
         ),
@@ -286,8 +351,8 @@ pub fn push_menu(state: &Shared) {
 /// pestana, ajustes).
 fn for_own_pages(state: &Shared, js: &str) {
     let st = state.borrow();
-    for tab in st.tabs.iter().filter(|t| is_own_page(&t.url)) {
-        let _ = tab.webview.evaluate_script(js);
+    for wv in own_page_views(&st) {
+        let _ = wv.evaluate_script(js);
     }
 }
 
@@ -360,7 +425,9 @@ pub fn push_extension_status(state: &Shared) {
 fn for_settings(state: &Shared, js: &str) {
     let st = state.borrow();
     for tab in st.tabs.iter().filter(|t| own_page_path(&t.url) == Some("/settings")) {
-        let _ = tab.webview.evaluate_script(js);
+        if let Some(wv) = &tab.webview {
+            let _ = wv.evaluate_script(js);
+        }
     }
 }
 
@@ -396,8 +463,8 @@ pub fn push_crashed(state: &Shared, tab_id: u64) {
     let Some((url, title, reason)) = crate::recovery::crash_info(state, tab_id) else { return };
     let data = json!({ "url": url, "host": security::host_of(&url).unwrap_or_default(), "title": title, "reason": reason });
     let st = state.borrow();
-    if let Some(tab) = st.tabs.iter().find(|t| t.id == tab_id && is_own_page(&t.url)) {
-        let _ = tab.webview.evaluate_script(&format!("window.onCrashed && window.onCrashed({data})"));
+    if let Some(wv) = st.tabs.iter().find(|t| t.id == tab_id && is_own_page(&t.url)).and_then(|t| t.webview.as_ref()) {
+        let _ = wv.evaluate_script(&format!("window.onCrashed && window.onCrashed({data})"));
     }
 }
 
@@ -406,7 +473,7 @@ pub fn push_insecure(state: &Shared, tab_id: u64) {
     let Some((url, host, form)) = security::insecure_info(state, tab_id) else { return };
     let data = json!({ "url": url, "host": host, "form": form });
     let st = state.borrow();
-    if let Some(tab) = st.tabs.iter().find(|t| t.id == tab_id && is_own_page(&t.url)) {
-        let _ = tab.webview.evaluate_script(&format!("window.onInsecure && window.onInsecure({data})"));
+    if let Some(wv) = st.tabs.iter().find(|t| t.id == tab_id && is_own_page(&t.url)).and_then(|t| t.webview.as_ref()) {
+        let _ = wv.evaluate_script(&format!("window.onInsecure && window.onInsecure({data})"));
     }
 }

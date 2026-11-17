@@ -184,6 +184,13 @@
     if (e.key === 'Enter' && input.value.trim()) ipc('search', { q: input.value });
   });
 
+  // La pestana nueva de repuesto se carga oculta y pasa al frente despues
+  // (ver tabs::adopt_spare en Rust): el `autofocus` pudo no alcanzar al
+  // buscador. Al recibir el foco, si nada de la pagina lo tiene, va ahi.
+  window.addEventListener('focus', function () {
+    if (!document.activeElement || document.activeElement === document.body) input.focus();
+  });
+
   ipc('ready');
 })();
 </script>

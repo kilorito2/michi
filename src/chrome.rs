@@ -14,7 +14,7 @@ use wry::http::Request;
 use wry::{Rect, WebView};
 
 use crate::security;
-use crate::state::{Shared, EDGE_IDLE, PANEL_W, TOPBAR_H};
+use crate::state::{Shared, UiPiece, EDGE_IDLE, PANEL_W, TOPBAR_H};
 
 /// Fondo de los paneles laterales. Son opacos (a diferencia de la barra):
 /// se superponen a la pestana activa, y una ventana hija transparente no
@@ -24,6 +24,47 @@ use crate::state::{Shared, EDGE_IDLE, PANEL_W, TOPBAR_H};
 /// vez de un agujero. La pagina del panel pinta su propio fondo animado
 /// encima, asi que no necesita la transparencia de la ventana.
 pub const PANEL_BG: (u8, u8, u8, u8) = (18, 17, 31, 255);
+
+/// Crea esa pieza de la interfaz si todavia no existe. Nacen ocultas y se
+/// crean despues del primer cuadro (ver main::build_deferred_ui), o en el
+/// momento si se necesitan antes (abrir el menu, una pagina en pantalla
+/// completa). Nunca dentro de un callback de WebView2 (ver
+/// AppState::request_tab): el menu y el aviso se muestran desde una
+/// Action, en el bucle de eventos.
+pub fn ensure(state: &Shared, piece: UiPiece) {
+    {
+        let mut st = state.borrow_mut();
+        st.ui_pending.retain(|p| *p != piece);
+        let exists = match piece {
+            UiPiece::Notice => st.notice.is_some(),
+            UiPiece::Menu => st.menu.is_some(),
+            UiPiece::Suggestions => st.suggest.view.is_some(),
+        };
+        if exists || st.shutting_down || st.window.is_none() {
+            return;
+        }
+    }
+    let wv = match piece {
+        UiPiece::Notice => crate::notice::build(state),
+        UiPiece::Menu => crate::menu::build(state),
+        UiPiece::Suggestions => crate::suggest::build(state),
+    };
+    security::harden(state, &wv);
+    crate::context_menu::attach_ui(&wv);
+    crate::shortcuts::attach(state, &wv, false);
+    crate::recovery::attach(state, &wv, None);
+    {
+        let mut st = state.borrow_mut();
+        let slot = match piece {
+            UiPiece::Notice => &mut st.notice,
+            UiPiece::Menu => &mut st.menu,
+            UiPiece::Suggestions => &mut st.suggest.view,
+        };
+        *slot = Some(wv);
+    }
+    // Nacio arriba de todo: los desplegables quedan en su lugar (ver layout::raise_chrome).
+    crate::layout::raise_chrome(state);
+}
 
 /// Es el primer WebView de la interfaz: si falla, Michi no puede seguir y lo
 /// dice (ver main::fatal) en vez de cerrarse sin explicacion.

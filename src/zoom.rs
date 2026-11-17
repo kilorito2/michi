@@ -77,11 +77,12 @@ pub fn apply(state: &Shared, id: u64) {
     let (controller, target) = {
         let st = state.borrow();
         let Some(tab) = st.tabs.iter().find(|t| t.id == id) else { return };
+        let Some(wv) = &tab.webview else { return };
         let target = site_of(&tab.url).and_then(|s| st.site_zoom.get(&s).copied()).unwrap_or(st.settings.default_zoom);
-        if (crate::native::zoom(&tab.webview) - target).abs() < 0.001 {
+        if (crate::native::zoom(wv) - target).abs() < 0.001 {
             return;
         }
-        (tab.webview.controller(), target)
+        (wv.controller(), target)
     };
     let _ = unsafe { controller.SetZoomFactor(target) };
 }

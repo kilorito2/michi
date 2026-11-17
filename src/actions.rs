@@ -85,14 +85,14 @@ fn run(state: &Shared, action: Action) {
         }
         Action::Print => {
             menu::close(state);
-            if let Some(t) = state.borrow().active_tab() {
-                let _ = t.webview.print();
+            if let Some(wv) = state.borrow().active_tab().and_then(|t| t.webview.as_ref()) {
+                let _ = wv.print();
             }
         }
         Action::DevTools => {
             menu::close(state);
-            if let Some(t) = state.borrow().active_tab() {
-                t.webview.open_devtools();
+            if let Some(wv) = state.borrow().active_tab().and_then(|t| t.webview.as_ref()) {
+                wv.open_devtools();
             }
         }
         Action::Zoom(step) => {
@@ -101,8 +101,9 @@ fn run(state: &Shared, action: Action) {
             let (id, target, controller) = {
                 let st = state.borrow();
                 let Some(t) = st.active_tab() else { return };
-                let target = zoom_target(native::zoom(&t.webview), step, st.settings.default_zoom);
-                (t.id, target, t.webview.controller())
+                let Some(wv) = &t.webview else { return };
+                let target = zoom_target(native::zoom(wv), step, st.settings.default_zoom);
+                (t.id, target, wv.controller())
             };
             let _ = unsafe { controller.SetZoomFactor(target) };
             // Queda recordado para el sitio (ver zoom.rs).
@@ -120,7 +121,7 @@ fn run(state: &Shared, action: Action) {
                 let mut st = state.borrow_mut();
                 // La decidio Michi: puede ir a una pagina propia (ver security::guard_own_page).
                 crate::security::grant_own_page(&mut st, id, &url);
-                st.tabs.iter().find(|t| t.id == id).map(|t| t.webview.webview())
+                st.tabs.iter().find(|t| t.id == id).and_then(|t| t.webview.as_ref()).map(|w| w.webview())
             };
             if let Some(core) = core {
                 let _ = unsafe { core.Navigate(&windows_core::HSTRING::from(url.as_str())) };
@@ -174,11 +175,21 @@ fn open_settings(state: &Shared, section: &str) {
     };
     match existing {
         Some(i) => {
-            state.borrow_mut().active = i;
+            {
+                let mut st = state.borrow_mut();
+                st.active = i;
+                // Todavia sin abrir (ver Tab::webview): se abre ya en esa seccion.
+                let tab = &mut st.tabs[i];
+                if tab.is_lazy() && !section.is_empty() {
+                    tab.url = format!("{SETTINGS_URL}#{section}");
+                }
+            }
             tabs::activated(state);
             let st = state.borrow();
             let js = format!("location.hash = {}", serde_json::to_string(section).unwrap_or_default());
-            let _ = st.tabs[i].webview.evaluate_script(&js);
+            if let Some(wv) = &st.tabs[i].webview {
+                let _ = wv.evaluate_script(&js);
+            }
         }
         None => {
             let url = if section.is_empty() { SETTINGS_URL.to_string() } else { format!("{SETTINGS_URL}#{section}") };

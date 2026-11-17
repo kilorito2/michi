@@ -117,7 +117,7 @@ pub fn on_activated(state: &Shared) {
                 tab.rest.hidden_since = None;
                 if std::mem::take(&mut tab.rest.suspended) {
                     eprintln!("[rendimiento] pestana {} reanudada", tab.id);
-                    wake_up.push(tab.webview.webview());
+                    wake_up.extend(tab.webview.as_ref().map(|w| w.webview()));
                 }
             } else if tab.rest.hidden_since.is_none() {
                 tab.rest.hidden_since = Some(now);
@@ -148,10 +148,16 @@ pub fn on_mode_changed(state: &Shared) {
         for tab in st.tabs.iter_mut().filter(|t| !sleeps && t.rest.suspended) {
             tab.rest.suspended = false;
             eprintln!("[rendimiento] pestana {} reanudada (cambio de modo)", tab.id);
-            wake_up.push(tab.webview.webview());
+            wake_up.extend(tab.webview.as_ref().map(|w| w.webview()));
         }
         (normal, wake_up)
     };
+    // La pestana de repuesto es solo para el modo Normal (ver tabs::prepare_spare).
+    if normal {
+        crate::tabs::schedule_spare(state);
+    } else {
+        crate::tabs::drop_spare(state);
+    }
     resume(wake_up.into_iter());
     apply_memory(state);
     sync::push_perf(state);
@@ -178,10 +184,12 @@ fn apply_memory(state: &Shared) {
         let low_in_background = mode(&st).background_low_memory();
         let active = st.active;
         for (i, tab) in st.tabs.iter_mut().enumerate() {
+            // Sin WebView todavia (ver Tab::webview): no gasta nada.
+            let Some(wv) = &tab.webview else { continue };
             let low = low_in_background && i != active;
             if tab.rest.low_memory != low {
                 tab.rest.low_memory = low;
-                changes.push((tab.webview.webview(), low));
+                changes.push((wv.webview(), low));
             }
         }
     }
@@ -214,6 +222,7 @@ pub fn tick(state: &Shared) -> Option<Instant> {
         let (active, fullscreen, now) = (st.active, st.fullscreen, Instant::now());
         for (i, tab) in st.tabs.iter_mut().enumerate() {
             let Some(since) = tab.rest.hidden_since else { continue };
+            let Some(wv) = &tab.webview else { continue };
             if i == active || tab.rest.suspended || now < since + after {
                 continue;
             }
@@ -223,8 +232,9 @@ pub fn tick(state: &Shared) -> Option<Instant> {
             }
             // Si no se deja dormir (el motor se niega), se vuelve a intentar
             // despues de otro tanto, no en cada vuelta.
+            let core = wv.webview();
             tab.rest.hidden_since = Some(now);
-            due.push((tab.id, tab.webview.webview()));
+            due.push((tab.id, core));
         }
     }
     for (id, core) in due {

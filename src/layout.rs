@@ -43,18 +43,20 @@ pub fn relayout(state: &Shared) {
         let _ = wv.set_visible(!fullscreen);
     }
 
-    if let Some(active_tab) = st.tabs.get(st.active) {
-        let _ = active_tab.webview.set_bounds(content);
-        let _ = active_tab.webview.set_visible(true);
+    // Una de la sesion que todavia no se abrio no tiene WebView: se crea en
+    // la proxima vuelta del bucle (ver tabs::load_active).
+    if let Some(wv) = st.tabs.get(st.active).and_then(|t| t.webview.as_ref()) {
+        let _ = wv.set_bounds(content);
+        let _ = wv.set_visible(true);
     }
 
     // Ocultas de verdad (no solo 0x0): asi la pagina pasa a
     // document.hidden, Chromium la frena, y el fondo animado de una pestana
     // nueva en segundo plano deja de decodificar video (ver ui/wallpaper.js).
     for (i, t) in st.tabs.iter().enumerate() {
-        if i != st.active {
-            let _ = t.webview.set_visible(false);
-            let _ = t.webview.set_bounds(rect(0.0, 0.0, 0.0, 0.0));
+        if let (true, Some(wv)) = (i != st.active, &t.webview) {
+            let _ = wv.set_visible(false);
+            let _ = wv.set_bounds(rect(0.0, 0.0, 0.0, 0.0));
         }
     }
 

@@ -106,7 +106,9 @@ pub fn on_tab_switch(state: &Shared) {
 fn exit_page(state: &Shared, id: u64) {
     let st = state.borrow();
     if let Some(tab) = st.tabs.iter().find(|t| t.id == id) {
-        let _ = tab.webview.evaluate_script("document.fullscreenElement && document.exitFullscreen().catch(() => {})");
+        if let Some(wv) = &tab.webview {
+            let _ = wv.evaluate_script("document.fullscreenElement && document.exitFullscreen().catch(() => {})");
+        }
     }
 }
 

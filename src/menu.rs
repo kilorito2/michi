@@ -61,6 +61,8 @@ pub fn toggle(state: &Shared) {
 }
 
 pub fn show(state: &Shared) {
+    // Si todavia no se creo (los primeros instantes, ver main::build_deferred_ui).
+    crate::chrome::ensure(state, crate::state::UiPiece::Menu);
     {
         let mut st = state.borrow_mut();
         // Alt+F con un video en pantalla completa: la barra esta oculta.

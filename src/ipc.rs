@@ -345,6 +345,9 @@ pub fn dispatch(state: &Shared, source: &str, raw: &str) {
             sync::push_perf(state);
             sync::push_wallpaper(state);
             sync::push_menu(state);
+            // La pagina pudo nacer despues de que se congelo el fondo (ver
+            // main::build_deferred_ui).
+            sync::push_media_now(state);
             extensions::refresh(state);
             sync::push_expanded(state, Side::Left);
             sync::push_expanded(state, Side::Right);
@@ -387,13 +390,12 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
         return;
     }
     let Some(page) = own_page_path(source) else { return };
-    let trusted = state
-        .borrow()
-        .tabs
-        .iter()
-        .find(|t| t.id == tab_id)
-        .map(|t| is_own_page(&t.url))
-        .unwrap_or(false);
+    // La pestana de repuesto tambien (ver tabs::prepare_spare): se anuncia
+    // ("ready") antes de pasar a `tabs`.
+    let trusted = {
+        let st = state.borrow();
+        st.tabs.iter().chain(&st.spare).find(|t| t.id == tab_id).is_some_and(|t| is_own_page(&t.url))
+    };
     if !trusted {
         return;
     }
@@ -428,12 +430,8 @@ pub fn dispatch_from_content(state: &Shared, tab_id: u64, source: &str, raw: &st
         Command::InsecureProceed => security::proceed_insecure(state, tab_id),
         Command::InsecureBack => {
             let st = state.borrow();
-            if let Some(tab) = st.tabs.iter().find(|t| t.id == tab_id) {
-                let _ = if tab.webview.can_go_back().unwrap_or(false) {
-                    tab.webview.go_back()
-                } else {
-                    tab.webview.load_url(HOME_LOAD_URL)
-                };
+            if let Some(wv) = st.tabs.iter().find(|t| t.id == tab_id).and_then(|t| t.webview.as_ref()) {
+                let _ = if wv.can_go_back().unwrap_or(false) { wv.go_back() } else { wv.load_url(HOME_LOAD_URL) };
             }
         }
         other => handle_page_command(state, other),
@@ -711,6 +709,15 @@ pub fn load_in_active(state: &Shared, url: &str) {
         if let Some(id) = st.active_tab().map(|t| t.id) {
             security::grant_own_page(&mut st, id, url);
         }
+        // Todavia sin abrir (ver Tab::webview): se abre directamente ahi.
+        let active = st.active;
+        if let Some(tab) = st.tabs.get_mut(active).filter(|t| t.is_lazy()) {
+            tab.url = url.to_string();
+            tab.title.clear();
+            tab.favicon = None;
+            st.wake();
+            return;
+        }
     }
     with_active(state, |w| { let _ = w.load_url(url); });
 }
@@ -721,8 +728,8 @@ fn window(state: &Shared) -> Option<std::rc::Rc<winit::window::Window>> {
 
 fn with_active(state: &Shared, f: impl FnOnce(&wry::WebView)) {
     let st = state.borrow();
-    if let Some(tab) = st.tabs.get(st.active) {
-        f(&tab.webview);
+    if let Some(wv) = st.tabs.get(st.active).and_then(|t| t.webview.as_ref()) {
+        f(wv);
     }
 }
 

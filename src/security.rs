@@ -292,7 +292,8 @@ pub fn apply_smartscreen(state: &Shared) {
     let st = state.borrow();
     let on = st.settings.smartscreen;
     let chrome = [&st.topbar, &st.left_panel, &st.right_panel, &st.menu].into_iter().flatten();
-    let tabs = st.tabs.iter().map(|t| &t.webview);
+    // Tambien la pestana de repuesto (ver tabs::prepare_spare).
+    let tabs = st.tabs.iter().chain(&st.spare).filter_map(|t| t.webview.as_ref());
     let popup = st.ext_popup.iter().map(|p| &p.webview);
     for webview in chrome.chain(tabs).chain(popup) {
         set_smartscreen(webview, on);
@@ -322,8 +323,8 @@ fn set_autofill_on(webview: &WebView, autofill: bool) {
 
 pub fn apply_autofill(state: &Shared) {
     let st = state.borrow();
-    for tab in &st.tabs {
-        set_autofill_on(&tab.webview, st.settings.autofill);
+    for wv in st.tabs.iter().chain(&st.spare).filter_map(|t| t.webview.as_ref()) {
+        set_autofill_on(wv, st.settings.autofill);
     }
 }
 
@@ -629,7 +630,7 @@ pub fn proceed_insecure(state: &Shared, id: u64) {
         let mut st = state.borrow_mut();
         let Some(tab) = st.tabs.iter().find(|t| t.id == id) else { return };
         let (target, form) = (tab.sec.insecure_target.clone(), tab.sec.insecure_form);
-        let can_go_back = tab.webview.can_go_back().unwrap_or(false);
+        let can_go_back = tab.webview.as_ref().is_some_and(|w| w.can_go_back().unwrap_or(false));
         let Some(url) = target else { return };
         if let Some(host) = host_of(&url) {
             st.http_allowed.insert(host);
@@ -642,8 +643,8 @@ pub fn proceed_insecure(state: &Shared, id: u64) {
         }
     };
     if back_to_form {
-        if let Some(tab) = state.borrow().tabs.iter().find(|t| t.id == id) {
-            let _ = tab.webview.go_back();
+        if let Some(wv) = state.borrow().tabs.iter().find(|t| t.id == id).and_then(|t| t.webview.as_ref()) {
+            let _ = wv.go_back();
         }
     }
 }
@@ -733,10 +734,11 @@ pub fn tick(state: &Shared) -> Option<Instant> {
         let mut st = state.borrow_mut();
         for tab in st.tabs.iter_mut() {
             let Some(started) = tab.sec.upgrade.as_ref().and_then(|up| up.started) else { continue };
+            let Some(core) = tab.webview.as_ref().map(|w| w.webview()) else { continue };
             let deadline = started + UPGRADE_TIMEOUT;
             if now >= deadline {
                 let up = tab.sec.upgrade.take().unwrap();
-                expired.push((tab.id, up, tab.webview.webview()));
+                expired.push((tab.id, up, core));
             } else {
                 next = Some(next.map_or(deadline, |n| n.min(deadline)));
             }
@@ -1070,7 +1072,8 @@ pub fn shutdown(state: &Shared) {
             let mut token = 0i64;
             let _ = unsafe { env.add_BrowserProcessExited(&handler, &mut token) };
         }
-        let mut views: Vec<WebView> = std::mem::take(&mut st.tabs).into_iter().map(|t| t.webview).collect();
+        let mut views: Vec<WebView> =
+            std::mem::take(&mut st.tabs).into_iter().chain(st.spare.take()).filter_map(|t| t.webview).collect();
         views.extend(st.ext_popup.take().map(|p| p.webview));
         views.extend(
             [st.topbar.take(), st.left_panel.take(), st.right_panel.take(), st.menu.take(), st.suggest.view.take(), st.notice.take()]

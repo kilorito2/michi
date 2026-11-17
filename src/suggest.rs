@@ -349,8 +349,8 @@ pub fn on_pick(state: &Shared, index: usize) {
         _ => activate(state, &item),
     }
     // El clic se llevo el foco al desplegable (ya oculto): a la pagina.
-    if let Some(tab) = state.borrow().active_tab() {
-        let _ = tab.webview.focus();
+    if let Some(wv) = state.borrow().active_tab().and_then(|t| t.webview.as_ref()) {
+        let _ = wv.focus();
     }
     topbar(state, "window.onSuggestDone && window.onSuggestDone()");
 }

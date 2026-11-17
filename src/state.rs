@@ -80,7 +80,10 @@ pub fn own_page_path(url: &str) -> Option<&str> {
 /// Una pestana = un WebView real e independiente (motor WebView2 completo, no un iframe).
 pub struct Tab {
     pub id: u64,
-    pub webview: WebView,
+    /// None = pestana de la sesion anterior que todavia no se abrio: su
+    /// WebView se crea recien cuando pasa al frente (ver tabs::ensure_loaded).
+    /// Mientras tanto muestra el titulo y el logo que se recuerdan de `url`.
+    pub webview: Option<WebView>,
     pub title: String,
     pub url: String,
     pub loading: bool,
@@ -132,6 +135,35 @@ pub struct TabGroup {
 }
 
 impl Tab {
+    /// Una pestana con lo de siempre (ver tabs::create_tab y la sesion en
+    /// main::open_startup_tabs, que las crea sin WebView).
+    pub fn new(id: u64, webview: Option<WebView>, url: &str, incognito: bool) -> Self {
+        Tab {
+            id,
+            loading: webview.is_some(),
+            webview,
+            title: String::new(),
+            url: url.to_string(),
+            favicon: None,
+            sec: Default::default(),
+            playing: Default::default(),
+            incognito,
+            rest: Default::default(),
+            crashed: None,
+            pinned: false,
+            muted: false,
+            group: None,
+            password_offer: None,
+            password_capture_at: None,
+            assistant: false,
+        }
+    }
+
+    /// Todavia sin WebView (ver Tab::webview).
+    pub fn is_lazy(&self) -> bool {
+        self.webview.is_none()
+    }
+
     /// La direccion de verdad de la pestana: en la pagina de aviso de HTTPS o
     /// en la de "dejo de funcionar", el sitio que esta esperando ahi (es lo
     /// que muestra la barra y lo que se guarda en la sesion).
@@ -245,17 +277,6 @@ pub enum Action {
     /// Cerrar Michi de forma ordenada (ver security::shutdown): suelta los
     /// WebView, cosa que no se puede hacer dentro de sus propios callbacks.
     Shutdown,
-}
-
-/// Una pestana de la sesion anterior esperando su turno (ver tabs::restore_next).
-#[derive(Debug, Clone)]
-pub struct RestoreTab {
-    /// Posicion en la sesion guardada.
-    pub index: usize,
-    pub url: String,
-    pub pinned: bool,
-    /// Id del grupo (ya creado, ver groups::create_saved).
-    pub group: Option<u64>,
 }
 
 /// Una pestana pedida, esperando su vuelta del bucle (ver AppState::request_tab).
@@ -465,12 +486,18 @@ pub struct AppState {
     saves: PendingSaves,
     /// Preguntando si se cierra con descargas sin terminar (ver security::confirm_quit).
     pub quit_asking: bool,
-    /// Pestanas de la sesion anterior que todavia no se crearon (ver
-    /// tabs::restore_next), en orden.
-    pub restore_queue: Vec<RestoreTab>,
-    /// Posicion en la sesion guardada de cada pestana ya restaurada (por id),
-    /// para ubicar las que faltan entre ellas. Se vacia al terminar.
-    pub restore_index: HashMap<u64, usize>,
+    /// Pestana nueva de repuesto, ya creada y oculta: Ctrl+T y "+" la toman
+    /// en vez de esperar a que se cree un WebView (ver tabs::adopt_spare).
+    /// No esta en `tabs`.
+    pub spare: Option<Tab>,
+    /// Desde cuando se puede preparar la proxima de repuesto (ver tabs::prepare_spare).
+    pub spare_due: Option<Instant>,
+    /// Piezas de la interfaz que nacen ocultas y se crean despues del primer
+    /// cuadro, de a una por vuelta del bucle (ver main::build_deferred_ui).
+    pub ui_pending: Vec<UiPiece>,
+    /// Que hay que reenviar a la interfaz en la proxima vuelta del bucle (ver
+    /// sync::mark y sync::flush).
+    pub dirty: Dirty,
 
     next_id: u64,
 }
@@ -529,8 +556,10 @@ impl AppState {
             assistant_until: None,
             saves: PendingSaves::default(),
             quit_asking: false,
-            restore_queue: Vec::new(),
-            restore_index: HashMap::new(),
+            spare: None,
+            spare_due: None,
+            ui_pending: Vec::new(),
+            dirty: Dirty::default(),
 
             next_id: 1,
         }
@@ -603,6 +632,15 @@ impl AppState {
         self.tabs.get(self.active)
     }
 
+    /// La pestana `id`, o la de repuesto si es esa: sus avisos de titulo y
+    /// carga llegan antes de que pase a `tabs` (ver tabs::adopt_spare).
+    pub fn tab_or_spare_mut(&mut self, id: u64) -> Option<&mut Tab> {
+        match self.tabs.iter_mut().find(|t| t.id == id) {
+            Some(tab) => Some(tab),
+            None => self.spare.as_mut().filter(|t| t.id == id),
+        }
+    }
+
     /// Cuantas pestanas fijadas hay (siempre son las primeras).
     pub fn pinned_count(&self) -> usize {
         self.tabs.iter().take_while(|t| t.pinned).count()
@@ -666,7 +704,7 @@ impl AppState {
         if s.favicons.replace(false) && keep {
             storage::save_in_background(storage::FAVICONS_FILE, &self.suggest.favicons);
         }
-        // Tambien a mitad de la restauracion: session() incluye las que faltan.
+        // Las de la sesion que todavia no se abrieron tambien (ver Tab::webview).
         if s.session.replace(false) && keep {
             storage::save_in_background(storage::SESSION_FILE, &self.session());
         }
@@ -695,7 +733,6 @@ impl AppState {
             .iter()
             .filter(|t| !t.incognito)
             .map(|t| SessionRow {
-                index: self.restore_index.get(&t.id).copied(),
                 url: t.real_url().to_string(),
                 pinned: t.pinned,
                 group: t.group,
@@ -704,7 +741,6 @@ impl AppState {
         // Cuantas pestanas normales hay antes de la activa (si la activa es de
         // incognito, queda la normal que sigue, o la ultima).
         let before = self.tabs.iter().take(self.active).filter(|t| !t.incognito).count();
-        let (rows, before) = merge_restore_queue(rows, before, &self.restore_queue);
         let urls: Vec<String> = rows.iter().map(|r| r.url.clone()).collect();
         // Las fijadas van primero: alcanza con cuantas son.
         let pinned = rows.iter().filter(|r| r.pinned).count();
@@ -744,37 +780,27 @@ pub type Shared = Rc<RefCell<AppState>>;
 /// Una pestana tal como se guarda en la sesion (ver AppState::session).
 #[derive(Debug, Clone, PartialEq)]
 struct SessionRow {
-    /// Su posicion en la sesion anterior, si es una restaurada.
-    index: Option<usize>,
     url: String,
     pinned: bool,
     group: Option<u64>,
 }
 
-/// Las pestanas abiertas mas las de la sesion anterior que todavia no se
-/// crearon (ver tabs::restore_next), cada una en su lugar. Sin esto, cerrar
-/// Michi a mitad de la restauracion guardaba solo las ya creadas: las demas
-/// se perdian. `active`: la posicion de la activa en `rows`; devuelve la
-/// nueva.
-fn merge_restore_queue(mut rows: Vec<SessionRow>, active: usize, queue: &[RestoreTab]) -> (Vec<SessionRow>, usize) {
-    let mut active = active;
-    for entry in queue {
-        let existing: Vec<(Option<usize>, bool)> = rows.iter().map(|r| (r.index, r.pinned)).collect();
-        let at = crate::tabs::restore_position(&existing, entry.index, entry.pinned);
-        if at <= active && !rows.is_empty() {
-            active += 1;
-        }
-        rows.insert(
-            at,
-            SessionRow {
-                index: Some(entry.index),
-                url: entry.url.clone(),
-                pinned: entry.pinned,
-                group: if entry.pinned { None } else { entry.group },
-            },
-        );
-    }
-    (rows, active)
+/// Piezas de la interfaz creadas despues del primer cuadro (ver AppState::ui_pending).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiPiece {
+    Notice,
+    Menu,
+    Suggestions,
+}
+
+/// Lo que cambio y todavia no se le mando a la interfaz (ver sync::mark). Con
+/// Cell: se anota desde callbacks que solo tienen `&AppState`.
+#[derive(Default)]
+pub struct Dirty {
+    pub tabs: Cell<bool>,
+    pub active_tab: Cell<bool>,
+    pub history: Cell<bool>,
+    pub media: Cell<bool>,
 }
 
 /// Cada cuanto, como mucho, se escriben el historial, la sesion y los logos.
@@ -837,19 +863,19 @@ mod tests {
     }
 
     #[test]
-    fn closing_mid_restore_keeps_the_tabs_still_waiting() {
-        let row = |index: Option<usize>, url: &str, pinned: bool| SessionRow { index, url: url.into(), pinned, group: None };
-        let queue = |index: usize, url: &str, pinned: bool, group: Option<u64>| RestoreTab { index, url: url.into(), pinned, group };
-        // Ya estan la 0 (fijada) y la 3 (activa) y una nueva del usuario; faltan la 1 y la 2.
-        let rows = vec![row(Some(0), "a", true), row(Some(3), "d", false), row(None, "nueva", false)];
-        let (merged, active) = merge_restore_queue(rows, 1, &[queue(1, "b", true, None), queue(2, "c", false, Some(9))]);
-        let urls: Vec<&str> = merged.iter().map(|r| r.url.as_str()).collect();
-        assert_eq!(urls, vec!["a", "b", "c", "d", "nueva"]);
-        assert_eq!(merged[active].url, "d");
-        assert_eq!(merged[2].group, Some(9));
-        // Sin nada pendiente, igual que antes.
-        let (same, active) = merge_restore_queue(vec![row(None, "x", false)], 0, &[]);
-        assert_eq!((same.len(), active), (1, 0));
+    fn tabs_not_opened_yet_are_still_saved_in_the_session() {
+        let _dir = storage::test_dir::TempDataDir::new("sesion-sin-abrir");
+        let mut st = AppState::new();
+        for (i, url) in ["https://a.com/", "https://b.com/", "https://c.com/"].iter().enumerate() {
+            let mut tab = Tab::new(i as u64 + 1, None, url, false);
+            tab.pinned = i == 0;
+            st.tabs.push(tab);
+        }
+        st.tabs.push(Tab::new(9, None, "https://incognito.com/", true));
+        st.active = 2;
+        let session = st.session();
+        assert_eq!(session.urls, ["https://a.com/", "https://b.com/", "https://c.com/"]);
+        assert_eq!((session.active, session.pinned), (2, 1));
     }
 
     #[test]

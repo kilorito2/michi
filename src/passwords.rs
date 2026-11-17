@@ -308,8 +308,9 @@ pub fn check_offers(state: &Shared) -> Option<Instant> {
                 next = Some(next.map_or(offer.next_check, |n| n.min(offer.next_check)));
                 continue;
             }
+            let Some(wv) = &tab.webview else { continue };
             offer.checking = true;
-            due.push((tab.id, wry::WebViewExtWindows::webview(&tab.webview)));
+            due.push((tab.id, wry::WebViewExtWindows::webview(wv)));
         }
     }
     // Sin prestamos vivos: el resultado llega despues, en el callback.
@@ -457,8 +458,8 @@ fn fill(state: &Shared, tab_id: u64, id: u64) {
         fill_script(&username, &password)
     };
     let st = state.borrow();
-    if let Some(tab) = st.tabs.iter().find(|t| t.id == tab_id) {
-        let _ = tab.webview.evaluate_script(&script);
+    if let Some(wv) = st.tabs.iter().find(|t| t.id == tab_id).and_then(|t| t.webview.as_ref()) {
+        let _ = wv.evaluate_script(&script);
     }
 }
 

@@ -119,6 +119,11 @@ fn reason(args: &ICoreWebView2ProcessFailedEventArgs) -> Reason {
 /// estilo y sin boton; la nuestra explica que paso y la vuelve a cargar.
 fn page_failed(state: &Shared, id: u64, reason: Reason) {
     let mut st = state.borrow_mut();
+    // La pestana de repuesto: queda anotada y no se usa (ver tabs::adopt_spare).
+    if let Some(spare) = st.spare.as_mut().filter(|t| t.id == id) {
+        spare.crashed = Some(Crash { url: spare.url.clone(), title: String::new(), reason });
+        return;
+    }
     let Some(tab) = st.tabs.iter_mut().find(|t| t.id == id) else { return };
     // Si la que se cae es la propia pagina de aviso, no hay a donde ir.
     if own_page_path(&tab.url) == Some("/crashed") {
@@ -193,7 +198,9 @@ fn ask_reload(state: &Shared, id: u64) {
 pub fn reload_hung(state: &Shared, id: u64) {
     let st = state.borrow();
     if let Some(tab) = st.tabs.iter().find(|t| t.id == id) {
-        let _ = tab.webview.reload();
+        if let Some(wv) = &tab.webview {
+            let _ = wv.reload();
+        }
     }
 }
 

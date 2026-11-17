@@ -49,7 +49,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
-use state::{AppState, RestoreTab, Shared, UserEvent, HOME_URL, MIN_WINDOW_H, MIN_WINDOW_W};
+use state::{AppState, Shared, UiPiece, UserEvent, HOME_URL, MIN_WINDOW_H, MIN_WINDOW_W};
 
 struct App {
     state: Shared,
@@ -109,13 +109,12 @@ impl ApplicationHandler<UserEvent> for App {
         };
         let left = chrome::build_left_panel(&self.state);
         let right = chrome::build_right_panel(&self.state);
-        let menu = menu::build(&self.state);
-        let suggestions = suggest::build(&self.state);
-        let notice = notice::build(&self.state);
-        for wv in [&topbar, &left, &right, &menu, &suggestions, &notice] {
+        for wv in [&topbar, &left, &right] {
             security::harden(&self.state, wv);
             context_menu::attach_ui(wv);
-            shortcuts::attach(&self.state, wv, wv_is_chrome(wv, &topbar, &left, &right));
+            // La barra y los paneles: si uno tiene el foco del teclado, al
+            // volver a la ventana se lo devolvemos a el (ver shortcuts::restore_focus).
+            shortcuts::attach(&self.state, wv, true);
             recovery::attach(&self.state, wv, None);
         }
         {
@@ -123,9 +122,11 @@ impl ApplicationHandler<UserEvent> for App {
             st.topbar = Some(topbar);
             st.left_panel = Some(left);
             st.right_panel = Some(right);
-            st.menu = Some(menu);
-            st.suggest.view = Some(suggestions);
-            st.notice = Some(notice);
+            // El aviso de pantalla completa, el menu y las sugerencias nacen
+            // ocultos: se crean despues del primer cuadro, de a uno por vuelta
+            // del bucle (ver build_deferred_ui). Antes eran siete WebView
+            // seguidos antes de mostrar nada.
+            st.ui_pending = vec![UiPiece::Notice, UiPiece::Menu, UiPiece::Suggestions];
         }
         // Ajustes del perfil (necesitan algun WebView ya creado).
         security::apply_tracking_prevention(&self.state);
@@ -140,6 +141,8 @@ impl ApplicationHandler<UserEvent> for App {
         sync::push_maximized(&self.state);
         sync::push_wallpaper(&self.state);
         update::check_on_start(&self.state);
+        // La primera pestana de repuesto, cuando ya arranco todo (ver tabs::prepare_spare).
+        tabs::schedule_spare(&self.state);
     }
 
     fn window_event(&mut self, _event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
@@ -198,37 +201,48 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Pestanas pedidas desde callbacks de WebView2 (ver AppState::request_tab).
-        // De a UNA por vuelta: crear un WebView bloquea el hilo ~100-150ms, y
-        // con varios pedidos juntos (clics seguidos en "+") crearlos todos de
-        // una congelaba la ventana sin repintar. Entre una y otra el bucle
-        // vuelve a procesar eventos (y a dibujar).
-        // Antes que nada las de window.open(): su pagina espera en pausa.
-        let next_window = {
-            let mut st = self.state.borrow_mut();
-            (!st.pending_windows.is_empty()).then(|| st.pending_windows.remove(0))
+        // Lo que crea un WebView, de a UNO por vuelta: crear uno bloquea el
+        // hilo ~100-150ms, y con varios juntos (clics seguidos en "+") la
+        // ventana se congelaba sin repintar. Entre uno y otro el bucle vuelve a
+        // procesar eventos (y a dibujar). En orden de urgencia:
+        let created = 'one: {
+            // 1. Las de window.open(): su pagina espera en pausa.
+            let next_window = {
+                let mut st = self.state.borrow_mut();
+                (!st.pending_windows.is_empty()).then(|| st.pending_windows.remove(0))
+            };
+            if let Some(w) = next_window {
+                tabs::open_window(&self.state, w);
+                break 'one true;
+            }
+            // 2. La que esta al frente y todavia no se abrio (una de la sesion
+            // anterior, ver tabs::load_active).
+            if tabs::load_active(&self.state) {
+                break 'one true;
+            }
+            // 3. Pestanas pedidas desde callbacks de WebView2 (ver AppState::request_tab).
+            let next_tab = {
+                let mut st = self.state.borrow_mut();
+                (!st.pending_tabs.is_empty()).then(|| st.pending_tabs.remove(0))
+            };
+            if let Some(pending) = next_tab {
+                tabs::open_pending(&self.state, pending);
+                break 'one true;
+            }
+            // 4. Lo que falta de la interfaz (el menu, las sugerencias, el aviso).
+            build_deferred_ui(&self.state)
         };
-        if let Some(w) = next_window {
-            tabs::open_window(&self.state, w);
-            self.state.borrow().wake();
-        }
-        let next_tab = {
-            let mut st = self.state.borrow_mut();
-            (!st.pending_tabs.is_empty()).then(|| st.pending_tabs.remove(0))
-        };
-        if let Some(pending) = next_tab {
-            tabs::open_pending(&self.state, pending);
-            if !self.state.borrow().pending_tabs.is_empty() {
+        // 5. Con todo lo demas hecho, la pestana nueva de repuesto.
+        let spare = if created {
+            None
+        } else {
+            let (made, at) = tabs::prepare_spare(&self.state);
+            if made {
                 self.state.borrow().wake();
             }
-        }
-        // Las de la sesion anterior que faltan, de a una y despues de lo que
-        // pidio el usuario (ver tabs::restore_next).
-        let restoring = {
-            let st = self.state.borrow();
-            !st.restore_queue.is_empty() && st.pending_tabs.is_empty() && st.pending_windows.is_empty()
+            at
         };
-        if restoring && tabs::restore_next(&self.state) {
+        if created {
             self.state.borrow().wake();
         }
         // Intentos por HTTPS demorados (ver security::tick): antes de las
@@ -251,6 +265,8 @@ impl ApplicationHandler<UserEvent> for App {
         let notice = notice::tick(&self.state);
         let passwords = passwords::check_offers(&self.state);
         let assistant = control::tick(&self.state);
+        // Lo que cambio en las pestanas desde la ultima vuelta, de una vez (ver sync::mark).
+        sync::flush(&self.state);
         // Historial, sesion y logos: se escriben juntos cuando vence el plazo.
         let saves = {
             let st = self.state.borrow();
@@ -274,6 +290,7 @@ impl ApplicationHandler<UserEvent> for App {
             .chain(passwords)
             .chain(assistant)
             .chain(saves)
+            .chain(spare)
             .min()
         {
             Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
@@ -282,10 +299,21 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// La barra y los paneles laterales: si uno tiene el foco del teclado, al
-/// volver a la ventana se lo devolvemos a el (ver shortcuts::restore_focus).
-fn wv_is_chrome(wv: &wry::WebView, topbar: &wry::WebView, left: &wry::WebView, right: &wry::WebView) -> bool {
-    [topbar, left, right].into_iter().any(|c| std::ptr::eq(c, wv))
+/// Crea la proxima pieza de la interfaz que falta (ver AppState::ui_pending).
+/// Devuelve si creo una.
+fn build_deferred_ui(state: &Shared) -> bool {
+    let piece = {
+        let st = state.borrow();
+        if st.shutting_down {
+            return false;
+        }
+        match st.ui_pending.first() {
+            Some(p) => *p,
+            None => return false,
+        }
+    };
+    chrome::ensure(state, piece);
+    true
 }
 
 /// Icono de la ventana (titulo, Alt+Tab) y de la barra de tareas: el mismo
@@ -319,35 +347,16 @@ fn open_startup_tabs(state: &Shared) {
         tabs::open_tab(state, requested.as_deref().unwrap_or(HOME_URL), false);
         return;
     }
-    // Ahora solo la que estaba al frente; las demas, de a una por vuelta del
-    // bucle de eventos (ver tabs::restore_next y about_to_wait), cada una con
-    // su fijada y su grupo.
-    let group_ids = groups::create_saved(state, &session.groups);
-    let mut queue: Vec<RestoreTab> = session
-        .urls
-        .iter()
-        .enumerate()
-        .map(|(i, url)| RestoreTab {
-            index: i,
-            url: url.clone(),
-            pinned: i < session.pinned,
-            group: session.tab_groups.get(i).copied().flatten().and_then(|g| group_ids.get(g).copied()),
-        })
-        .collect();
-    let mut first = Some(queue.remove(session.active.min(queue.len() - 1)));
-    state.borrow_mut().restore_queue = queue;
-    // Si la del frente no se pudo crear, la siguiente pasa al frente.
-    while let Some(entry) = first.take() {
-        if !tabs::restore(state, entry, true) {
-            let mut st = state.borrow_mut();
-            first = (!st.restore_queue.is_empty()).then(|| st.restore_queue.remove(0));
-        }
-    }
-    // Lo pedido al abrir (un enlace de otra aplicacion) queda al frente.
+    // Todas entran ya, sin WebView: cada una se abre recien cuando pasa al
+    // frente (ver tabs::restore_session). La del frente, ahora mismo.
+    tabs::restore_session(state, &session);
     if let Some(url) = requested {
+        // Lo pedido al abrir (un enlace de otra aplicacion) queda al frente.
         tabs::open_tab(state, &url, false);
-    } else if state.borrow().tabs.is_empty() {
-        tabs::open_tab(state, HOME_URL, false);
+    } else {
+        // Si no se puede abrir, se cierra y la siguiente pasa al frente (en
+        // el bucle de eventos, ver tabs::load_active).
+        tabs::load_active(state);
     }
 }
 
